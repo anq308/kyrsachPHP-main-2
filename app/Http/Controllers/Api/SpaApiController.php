@@ -22,6 +22,7 @@ use App\Models\ServiceRequest;
 use App\Models\User;
 use App\Services\CartService;
 use App\Services\OrderService;
+use App\Services\StatusHistoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -32,7 +33,8 @@ class SpaApiController extends Controller
 {
     public function __construct(
         private CartService $cartService,
-        private OrderService $orderService
+        private OrderService $orderService,
+        private StatusHistoryService $statusHistoryService
     ) {}
 
     public function bootstrap(Request $request): JsonResponse
@@ -521,7 +523,9 @@ class SpaApiController extends Controller
     public function adminUpdateOrderStatus(UpdateOrderStatusRequest $request, string $id): JsonResponse
     {
         $order = Order::findOrFail($id);
+        $oldStatus = $order->status;
         $order->update(['status' => $request->input('status')]);
+        $this->statusHistoryService->record($order, $oldStatus, $order->status, $request->user());
 
         return response()->json([
             'message' => 'Статус заказа #'.$order->id.' обновлён.',
@@ -532,7 +536,9 @@ class SpaApiController extends Controller
     public function adminUpdateSalesRequestStatus(UpdateSalesRequestStatusRequest $request, string $id): JsonResponse
     {
         $salesRequest = SalesRequest::findOrFail($id);
+        $oldStatus = $salesRequest->status;
         $salesRequest->update(['status' => $request->input('status')]);
+        $this->statusHistoryService->record($salesRequest, $oldStatus, $salesRequest->status, $request->user());
         $salesRequest->load(['user', 'motorcycle']);
 
         return response()->json([
@@ -554,7 +560,9 @@ class SpaApiController extends Controller
     public function adminUpdateServiceRequestStatus(UpdateServiceRequestStatusRequest $request, string $id): JsonResponse
     {
         $serviceRequest = ServiceRequest::findOrFail($id);
+        $oldStatus = $serviceRequest->status;
         $serviceRequest->update(['status' => $request->input('status')]);
+        $this->statusHistoryService->record($serviceRequest, $oldStatus, $serviceRequest->status, $request->user());
         $serviceRequest->load('user');
 
         return response()->json([
