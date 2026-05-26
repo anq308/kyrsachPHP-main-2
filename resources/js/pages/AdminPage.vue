@@ -30,6 +30,7 @@ const saving = ref(false);
 const errorText = ref('');
 const successText = ref('');
 const activeTab = ref<AdminTab>('dashboard');
+const expandedOrders = ref<number[]>([]);
 
 const searchQuery = ref('');
 const filterStatus = ref<'all' | 'available' | 'unavailable'>('all');
@@ -180,6 +181,41 @@ const dashboardServiceRequests = computed(() => serviceRequests.value.filter((re
 const latestOrders = computed(() => orders.value.slice(0, 5));
 const unavailableMotorcycles = computed(() => motorcycles.value.filter((moto) => !moto.is_available).slice(0, 5));
 
+const activeTabMeta = computed(() => {
+  const meta: Record<AdminTab, { title: string; description: string }> = {
+    dashboard: {
+      title: 'Рабочая сводка',
+      description: 'Самые важные обращения, заказы и складские сигналы.',
+    },
+    products: {
+      title: 'Склад и каталог',
+      description: 'Группировка товаров, наличие, цены и редактирование карточек.',
+    },
+    orders: {
+      title: 'Заказы клиентов',
+      description: 'Подтверждение, бронь, оплата и выдача техники.',
+    },
+    sales: {
+      title: 'Заявки на покупку',
+      description: 'Консультации, наличие, предзаказы и первичная обработка клиентов.',
+    },
+    service: {
+      title: 'Сервисные заявки',
+      description: 'Записи на обслуживание, диагностику и ремонт техники.',
+    },
+    users: {
+      title: 'Пользователи',
+      description: 'Клиенты, их заказы, заявки и сервисная активность.',
+    },
+    messages: {
+      title: 'Сообщения',
+      description: 'Обратная связь с сайта и входящие обращения.',
+    },
+  };
+
+  return meta[activeTab.value];
+});
+
 function formatCurrency(value: number): string {
   return `${Number(value || 0).toLocaleString('ru-RU')} ₽`;
 }
@@ -226,6 +262,16 @@ function reservationLabel(order: Order): string {
   }
 
   return 'Нет активной брони';
+}
+
+function toggleOrderDetails(id: number) {
+  expandedOrders.value = expandedOrders.value.includes(id)
+    ? expandedOrders.value.filter((orderId) => orderId !== id)
+    : [...expandedOrders.value, id];
+}
+
+function isOrderExpanded(id: number): boolean {
+  return expandedOrders.value.includes(id);
 }
 
 function productGroupKey(moto: Motorcycle): string {
@@ -453,20 +499,31 @@ onMounted(loadDashboard);
 
 <template>
   <div>
-    <div class="relative bg-dark overflow-hidden py-16 md:py-20">
+    <div class="relative bg-dark overflow-hidden py-10 md:py-12 border-b border-white/5">
       <div class="absolute inset-0">
         <div class="absolute inset-0 bg-gradient-to-b from-primary/5 via-dark to-dark" />
         <div class="absolute top-0 right-0 w-96 h-96 bg-primary/5 blur-3xl" />
       </div>
       <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div>
-            <p class="text-primary text-sm font-bold uppercase tracking-[0.25em] mb-3">Администратор AVANTIS</p>
-            <h1 class="text-4xl md:text-6xl font-bold font-display text-white uppercase italic tracking-tight">Панель менеджера</h1>
+            <p class="text-primary text-sm font-bold uppercase tracking-[0.25em] mb-3">Рабочее место менеджера</p>
+            <h1 class="text-3xl md:text-5xl font-bold font-display text-white uppercase italic tracking-tight">Админ-панель AVANTIS</h1>
           </div>
-          <p class="max-w-xl text-gray-500 text-lg">
-            Управление каталогом, заказами, заявками на покупку, сервисом, клиентами и входящими сообщениями.
-          </p>
+          <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
+            <button class="bg-dark-lighter border border-white/5 px-4 py-3 text-left" @click="activeTab = 'orders'">
+              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Заказы</span>
+              <span class="text-xl text-white font-display font-bold">{{ stats.ordersCount }}</span>
+            </button>
+            <button class="bg-dark-lighter border border-white/5 px-4 py-3 text-left" @click="activeTab = 'sales'">
+              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Покупка</span>
+              <span class="text-xl text-primary font-display font-bold">{{ stats.newSalesRequestsCount }}</span>
+            </button>
+            <button class="bg-dark-lighter border border-white/5 px-4 py-3 text-left" @click="activeTab = 'service'">
+              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Сервис</span>
+              <span class="text-xl text-green-300 font-display font-bold">{{ stats.newServiceRequestsCount }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -479,7 +536,31 @@ onMounted(loadDashboard);
         <p v-if="loading" class="text-gray-500 py-8">Загрузка...</p>
 
         <div v-else>
-          <div class="grid grid-cols-2 lg:grid-cols-6 gap-4 -mt-8 mb-10">
+          <section class="bg-dark-lighter border border-white/5 p-4 md:p-5 mb-6">
+            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+              <div>
+                <p class="text-primary text-xs font-bold uppercase tracking-[0.24em] mb-2">Раздел</p>
+                <h2 class="text-2xl md:text-3xl font-display font-bold text-white uppercase italic">{{ activeTabMeta.title }}</h2>
+                <p class="text-gray-500 text-sm mt-1">{{ activeTabMeta.description }}</p>
+              </div>
+
+              <div class="grid grid-cols-2 md:grid-cols-4 xl:flex xl:flex-wrap gap-2">
+                <button
+                  v-for="tab in tabs"
+                  :key="tab.id"
+                  type="button"
+                  class="px-3 py-2 border text-xs font-bold uppercase tracking-wider transition-all text-left"
+                  :class="activeTab === tab.id ? 'border-primary/60 bg-primary/10 text-primary' : 'border-white/5 bg-dark text-gray-500 hover:text-white hover:border-white/15'"
+                  @click="activeTab = tab.id"
+                >
+                  {{ tab.label }}
+                  <span class="text-[10px] text-gray-600 ml-1">{{ tabCount(tab.id) }}</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-8">
             <button class="admin-stat-card text-left" @click="activeTab = 'orders'">
               <span class="stat-line bg-blue-500" />
               <span class="stat-label">Заказы</span>
@@ -515,18 +596,6 @@ onMounted(loadDashboard);
               <span class="stat-label">Сообщения</span>
               <span class="stat-value">{{ stats.contactMessagesCount }}</span>
               <span class="stat-note">обратная связь</span>
-            </button>
-          </div>
-
-          <div class="flex items-center gap-1 mb-8 border-b border-white/5 overflow-x-auto">
-            <button
-              v-for="tab in tabs"
-              :key="tab.id"
-              class="px-5 py-3 text-sm font-bold font-display uppercase tracking-wider border-b-2 transition-all whitespace-nowrap"
-              :class="activeTab === tab.id ? 'text-primary border-primary' : 'text-gray-500 border-transparent hover:text-gray-300'"
-              @click="activeTab = tab.id"
-            >
-              {{ tab.label }} <span class="text-[10px] text-gray-600 ml-1">{{ tabCount(tab.id) }}</span>
             </button>
           </div>
 
@@ -810,7 +879,7 @@ onMounted(loadDashboard);
 
           <section v-show="activeTab === 'orders'" class="space-y-4">
             <article v-for="order in orders" :key="order.id" class="admin-record">
-              <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <button type="button" class="w-full text-left flex flex-col md:flex-row md:items-center md:justify-between gap-4" @click="toggleOrderDetails(order.id)">
                 <div>
                   <div class="flex items-center gap-3 mb-2">
                     <p class="text-white font-display font-bold uppercase">Заказ #{{ order.id }}</p>
@@ -820,12 +889,18 @@ onMounted(loadDashboard);
                 </div>
                 <div class="flex items-center gap-4">
                   <span class="text-xl font-bold text-primary font-display">{{ formatCurrency(order.total) }}</span>
-                  <select class="field-dark min-w-44" :value="order.status" @change="updateOrderStatus(order.id, ($event.target as HTMLSelectElement).value as Order['status'])">
+                  <span class="text-xs text-gray-600 uppercase tracking-wider">{{ isOrderExpanded(order.id) ? 'Свернуть' : 'Детали' }}</span>
+                </div>
+              </button>
+
+              <div class="mt-4 flex flex-col md:flex-row md:items-center gap-3">
+                <select class="field-dark md:max-w-64" :value="order.status" @change="updateOrderStatus(order.id, ($event.target as HTMLSelectElement).value as Order['status'])">
                     <option v-for="option in orderStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                   </select>
-                </div>
+                <p class="text-xs text-gray-600">При подтверждении клиент получит уведомление в личный кабинет.</p>
               </div>
-              <div class="mt-5 border-t border-white/5 pt-4 space-y-2">
+
+              <div v-if="isOrderExpanded(order.id)" class="mt-5 border-t border-white/5 pt-4 space-y-2">
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
                   <div class="bg-dark border border-white/5 p-4">
                     <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Оплата</p>

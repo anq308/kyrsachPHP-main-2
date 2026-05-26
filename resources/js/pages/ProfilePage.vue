@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
 import type { ClientNotification, Order, SalesRequest, ServiceRequest, User } from '../types';
+
+type ProfileTab = 'overview' | 'orders' | 'sales' | 'service' | 'notifications';
 
 const router = useRouter();
 
@@ -16,18 +18,34 @@ const serviceRequests = ref<ServiceRequest[]>([]);
 const notifications = ref<ClientNotification[]>([]);
 const unreadNotificationsCount = ref(0);
 const favoritesCount = ref(0);
+const activeTab = ref<ProfileTab>('overview');
 const expandedOrders = ref<number[]>([]);
 
+const latestOrder = computed(() => orders.value[0] ?? null);
+const activeOrders = computed(() => orders.value.filter((order) => !['completed', 'cancelled'].includes(order.status)));
+const activeSalesRequests = computed(() => salesRequests.value.filter((request) => !['completed', 'cancelled'].includes(request.status)));
+const activeServiceRequests = computed(() => serviceRequests.value.filter((request) => !['done', 'cancelled'].includes(request.status)));
+
+const tabs = computed<Array<{ id: ProfileTab; label: string; count: number }>>(() => [
+  { id: 'overview', label: 'Обзор', count: unreadNotificationsCount.value },
+  { id: 'orders', label: 'Заказы', count: orders.value.length },
+  { id: 'sales', label: 'Заявки', count: salesRequests.value.length },
+  { id: 'service', label: 'Сервис', count: serviceRequests.value.length },
+  { id: 'notifications', label: 'Уведомления', count: unreadNotificationsCount.value },
+]);
+
 function toggleOrder(id: number) {
-  if (expandedOrders.value.includes(id)) {
-    expandedOrders.value = expandedOrders.value.filter((orderId) => orderId !== id);
-    return;
-  }
-  expandedOrders.value = [...expandedOrders.value, id];
+  expandedOrders.value = expandedOrders.value.includes(id)
+    ? expandedOrders.value.filter((orderId) => orderId !== id)
+    : [...expandedOrders.value, id];
 }
 
 function isExpanded(id: number): boolean {
   return expandedOrders.value.includes(id);
+}
+
+function formatDate(value?: string | null): string {
+  return value ? new Date(value).toLocaleString('ru-RU') : 'Не назначено';
 }
 
 function paymentMethodLabel(method?: Order['payment_method']): string {
@@ -65,7 +83,7 @@ function salesTypeLabel(type: SalesRequest['type']): string {
     case 'purchase':
       return 'Покупка';
     case 'availability':
-      return 'Уточнить наличие';
+      return 'Наличие';
     case 'preorder':
       return 'Предзаказ';
     case 'test_drive':
@@ -110,312 +128,258 @@ onMounted(loadProfile);
 </script>
 
 <template>
-  <div>
-    <div class="relative bg-dark overflow-hidden py-16 md:py-20">
-      <div class="absolute inset-0">
-        <div class="absolute inset-0 bg-gradient-to-b from-primary/5 via-dark to-dark" />
-        <div class="absolute -top-40 right-0 w-96 h-96 bg-primary/10 rounded-full blur-[120px] pointer-events-none" />
-      </div>
-
-      <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex items-center gap-6" v-if="user">
-          <div class="w-20 h-20 bg-primary/20 border-2 border-primary/50 flex items-center justify-center text-primary text-3xl font-bold font-display">
-            {{ user.name.trim().charAt(0).toUpperCase() }}
+  <div class="bg-dark min-h-screen pb-20">
+    <section class="relative overflow-hidden border-b border-white/5 bg-dark-lighter/40">
+      <div class="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-dark pointer-events-none" />
+      <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-12">
+        <div v-if="user" class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div class="flex items-center gap-4">
+            <div class="w-16 h-16 bg-primary/15 border border-primary/40 flex items-center justify-center text-primary text-2xl font-bold font-display">
+              {{ user.name.trim().charAt(0).toUpperCase() }}
+            </div>
+            <div>
+              <p class="text-primary text-xs font-bold uppercase tracking-[0.24em] mb-1">Личный кабинет</p>
+              <h1 class="text-3xl md:text-4xl font-display font-bold text-white uppercase">{{ user.name }}</h1>
+              <p class="text-gray-500 text-sm">{{ user.email }}</p>
+            </div>
           </div>
-          <div>
-            <h1 class="text-4xl md:text-5xl font-bold font-display text-white uppercase tracking-wide mb-1">{{ user.name }}</h1>
-            <p class="text-gray-500">{{ user.email }}</p>
+
+          <div class="flex flex-wrap gap-2">
+            <RouterLink to="/catalog" class="filter-chip">Каталог</RouterLink>
+            <RouterLink to="/service" class="filter-chip">Сервис</RouterLink>
+            <RouterLink to="/favorites" class="filter-chip">Избранное</RouterLink>
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="bg-dark min-h-screen pb-24 relative">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <p v-if="loading" class="text-gray-500 py-8">Загрузка...</p>
-        <p v-if="errorText" class="mb-6 p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm">{{ errorText }}</p>
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+      <p v-if="loading" class="text-gray-500 py-8">Загрузка...</p>
+      <p v-if="errorText" class="mb-6 p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm">{{ errorText }}</p>
 
-        <div v-if="!loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 -mt-8 mb-12">
-          <div class="bg-dark-lighter border border-white/5 p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-            <div class="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs text-gray-600 uppercase tracking-wider font-bold mb-1">Заказов</p>
-                <p class="text-3xl font-display font-bold text-white">{{ orders.length }}</p>
-                <p v-if="unreadNotificationsCount" class="text-xs text-primary mt-1">{{ unreadNotificationsCount }} новых уведомлений</p>
-              </div>
-              <div class="w-12 h-12 bg-primary/10 flex items-center justify-center text-primary">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2" /></svg>
-              </div>
+      <div v-if="!loading" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <aside class="lg:col-span-3 space-y-4">
+          <section class="bg-dark-lighter border border-white/5 p-5">
+            <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-4">Навигация</p>
+            <div class="space-y-2">
+              <button
+                v-for="tab in tabs"
+                :key="tab.id"
+                type="button"
+                class="w-full flex items-center justify-between gap-3 px-4 py-3 border text-left text-sm font-bold uppercase tracking-wider transition-colors"
+                :class="activeTab === tab.id ? 'border-primary/60 bg-primary/10 text-primary' : 'border-white/5 bg-dark text-gray-400 hover:text-white hover:border-white/15'"
+                @click="activeTab = tab.id"
+              >
+                <span>{{ tab.label }}</span>
+                <span v-if="tab.count" class="text-xs text-gray-500">{{ tab.count }}</span>
+              </button>
             </div>
-          </div>
+          </section>
 
-          <div class="bg-dark-lighter border border-white/5 p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-            <div class="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs text-gray-600 uppercase tracking-wider font-bold mb-1">В избранном</p>
-                <p class="text-3xl font-display font-bold text-white">{{ favoritesCount }}</p>
-              </div>
-              <div class="w-12 h-12 bg-red-500/10 flex items-center justify-center text-red-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-dark-lighter border border-white/5 p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-            <div class="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-orange-500 to-transparent" />
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs text-gray-600 uppercase tracking-wider font-bold mb-1">Заявок</p>
-                <p class="text-3xl font-display font-bold text-white">{{ salesRequests.length }}</p>
-              </div>
-              <div class="w-12 h-12 bg-orange-500/10 flex items-center justify-center text-orange-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8m-8 4h5m-7 8h12a2 2 0 002-2V5a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-dark-lighter border border-white/5 p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-            <div class="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-green-500 to-transparent" />
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs text-gray-600 uppercase tracking-wider font-bold mb-1">Сервис</p>
-                <p class="text-3xl font-display font-bold text-white">{{ serviceRequests.length }}</p>
-              </div>
-              <div class="w-12 h-12 bg-green-500/10 flex items-center justify-center text-green-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /></svg>
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-dark-lighter border border-white/5 p-6 relative overflow-hidden group hover:border-primary/30 transition-colors">
-            <div class="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs text-gray-600 uppercase tracking-wider font-bold mb-1">Дата регистрации</p>
-                <p class="text-xl font-display font-bold text-white">{{ user?.created_at ? new Date(user.created_at).toLocaleDateString('ru-RU') : '—' }}</p>
-              </div>
-              <div class="w-12 h-12 bg-blue-500/10 flex items-center justify-center text-blue-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2" /></svg>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="!loading && user" class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-          <section class="bg-dark-lighter border border-white/5 p-6 lg:col-span-1">
-            <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-3">Личные данные</p>
-            <h2 class="text-2xl font-display font-bold text-white uppercase mb-5">{{ user.name }}</h2>
+          <section v-if="user" class="bg-dark-lighter border border-white/5 p-5">
+            <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-4">Профиль</p>
             <div class="space-y-3 text-sm">
-              <div class="flex items-center justify-between gap-4 border-b border-white/5 pb-3">
-                <span class="text-gray-500">Email</span>
-                <span class="text-gray-200 text-right">{{ user.email }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-4 border-b border-white/5 pb-3">
+              <div class="flex items-center justify-between gap-3">
                 <span class="text-gray-500">Роль</span>
                 <StatusBadge :status="user.is_admin ? 'admin' : 'user'" kind="role" />
               </div>
-              <div class="flex items-center justify-between gap-4">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Избранное</span>
+                <span class="text-white font-bold">{{ favoritesCount }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
                 <span class="text-gray-500">Регистрация</span>
-                <span class="text-gray-200">{{ user.created_at ? new Date(user.created_at).toLocaleDateString('ru-RU') : '—' }}</span>
+                <span class="text-white">{{ user.created_at ? new Date(user.created_at).toLocaleDateString('ru-RU') : '—' }}</span>
               </div>
             </div>
           </section>
+        </aside>
 
-          <section class="bg-dark-lighter border border-white/5 p-6 lg:col-span-2">
-            <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-3">Разделы кабинета</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <a href="#profile-orders" class="filter-chip block text-center">Мои заказы</a>
-              <a href="#profile-sales" class="filter-chip block text-center">Заявки на покупку</a>
-              <a href="#profile-service" class="filter-chip block text-center">Записи на сервис</a>
-              <RouterLink to="/favorites" class="filter-chip block text-center">Избранное</RouterLink>
+        <div class="lg:col-span-9 space-y-6">
+          <section v-show="activeTab === 'overview'" class="space-y-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <button type="button" class="admin-stat-card text-left" @click="activeTab = 'orders'">
+                <span class="stat-line bg-primary" />
+                <span class="stat-label">Активные заказы</span>
+                <span class="stat-value">{{ activeOrders.length }}</span>
+                <span class="stat-note">в работе</span>
+              </button>
+              <button type="button" class="admin-stat-card text-left" @click="activeTab = 'sales'">
+                <span class="stat-line bg-orange-500" />
+                <span class="stat-label">Заявки</span>
+                <span class="stat-value">{{ activeSalesRequests.length }}</span>
+                <span class="stat-note">активные</span>
+              </button>
+              <button type="button" class="admin-stat-card text-left" @click="activeTab = 'service'">
+                <span class="stat-line bg-green-500" />
+                <span class="stat-label">Сервис</span>
+                <span class="stat-value">{{ activeServiceRequests.length }}</span>
+                <span class="stat-note">записи</span>
+              </button>
+              <button type="button" class="admin-stat-card text-left" @click="activeTab = 'notifications'">
+                <span class="stat-line bg-blue-500" />
+                <span class="stat-label">Уведомления</span>
+                <span class="stat-value">{{ unreadNotificationsCount }}</span>
+                <span class="stat-note">новые</span>
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <article class="bg-dark-lighter border border-white/5 p-6">
+                <div class="flex items-start justify-between gap-4 mb-5">
+                  <div>
+                    <p class="text-primary text-xs font-bold uppercase tracking-[0.24em] mb-2">Последний заказ</p>
+                    <h2 class="text-2xl font-display font-bold text-white uppercase">{{ latestOrder ? `Заказ #${latestOrder.id}` : 'Заказов пока нет' }}</h2>
+                  </div>
+                  <StatusBadge v-if="latestOrder" :status="latestOrder.status" kind="order" />
+                </div>
+                <template v-if="latestOrder">
+                  <p class="text-gray-500 text-sm mb-4">{{ formatDate(latestOrder.created_at) }}</p>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div class="bg-dark border border-white/5 p-4">
+                      <p class="text-gray-600 uppercase text-xs font-bold mb-1">Сумма</p>
+                      <p class="text-primary font-display font-bold text-xl">{{ latestOrder.total.toLocaleString('ru-RU') }} ₽</p>
+                    </div>
+                    <div class="bg-dark border border-white/5 p-4">
+                      <p class="text-gray-600 uppercase text-xs font-bold mb-1">Выдача</p>
+                      <p class="text-white font-bold">{{ latestOrder.pickup_point?.name || 'Уточнит менеджер' }}</p>
+                    </div>
+                  </div>
+                  <button type="button" class="filter-chip mt-4" @click="activeTab = 'orders'">Открыть заказы</button>
+                </template>
+                <RouterLink v-else to="/catalog" class="btn btn-primary"><span>Перейти в каталог</span></RouterLink>
+              </article>
+
+              <article class="bg-dark-lighter border border-white/5 p-6">
+                <div class="flex items-center justify-between gap-4 mb-5">
+                  <div>
+                    <p class="text-primary text-xs font-bold uppercase tracking-[0.24em] mb-2">Новые сообщения</p>
+                    <h2 class="text-2xl font-display font-bold text-white uppercase">От менеджера</h2>
+                  </div>
+                  <button type="button" class="filter-chip" :disabled="!unreadNotificationsCount" @click="markNotificationsRead">Прочитано</button>
+                </div>
+                <div v-if="!notifications.length" class="empty-panel">Уведомлений пока нет.</div>
+                <div v-else class="space-y-3">
+                  <div v-for="notification in notifications.slice(0, 3)" :key="notification.id" class="bg-dark border border-white/5 p-4">
+                    <p class="text-white font-bold">{{ notification.title }}</p>
+                    <p class="text-gray-500 text-sm mt-1 line-clamp-2">{{ notification.message }}</p>
+                  </div>
+                </div>
+              </article>
             </div>
           </section>
-        </div>
 
-        <div class="flex flex-wrap gap-3 mb-12" v-if="!loading">
-          <RouterLink to="/favorites" class="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-lighter border border-white/5 text-gray-400 hover:text-white hover:border-primary/50 transition-all text-sm font-bold uppercase tracking-wider">
-            <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-            Избранное
-          </RouterLink>
-          <RouterLink to="/compare" class="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-lighter border border-white/5 text-gray-400 hover:text-white hover:border-primary/50 transition-all text-sm font-bold uppercase tracking-wider">
-            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-            Сравнение
-          </RouterLink>
-          <RouterLink to="/catalog" class="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-lighter border border-white/5 text-gray-400 hover:text-white hover:border-primary/50 transition-all text-sm font-bold uppercase tracking-wider">
-            <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-            Каталог
-          </RouterLink>
-          <RouterLink to="/cart" class="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-lighter border border-white/5 text-gray-400 hover:text-white hover:border-primary/50 transition-all text-sm font-bold uppercase tracking-wider">
-            <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" /></svg>
-            Корзина
-          </RouterLink>
-        </div>
-
-        <section v-if="!loading" class="bg-dark-lighter border border-white/5 p-6 mb-12">
-          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
-            <div>
-              <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-2">Уведомления</p>
-              <h2 class="text-2xl font-display font-bold text-white uppercase italic">Статусы от менеджера</h2>
+          <section v-show="activeTab === 'orders'" class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <h2 class="text-3xl font-display font-bold text-white uppercase">Мои заказы</h2>
+              <RouterLink to="/catalog" class="filter-chip">Новый заказ</RouterLink>
             </div>
-            <button
-              type="button"
-              class="filter-chip"
-              :disabled="!unreadNotificationsCount"
-              @click="markNotificationsRead"
-            >
-              Отметить прочитанными
-            </button>
-          </div>
 
-          <div v-if="!notifications.length" class="empty-panel">Пока нет уведомлений по заказам.</div>
-          <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <article
-              v-for="notification in notifications"
-              :key="notification.id"
-              class="bg-dark border p-4 transition-colors"
-              :class="notification.is_read ? 'border-white/5' : 'border-primary/40'"
-            >
-              <div class="flex items-start justify-between gap-3 mb-2">
-                <p class="text-white font-display font-bold uppercase">{{ notification.title }}</p>
+            <div v-if="!orders.length" class="empty-panel">
+              У вас пока нет заказов. Перейдите в каталог и выберите технику.
+            </div>
+
+            <article v-for="order in orders" v-else :key="order.id" class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <button type="button" class="w-full p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 text-left hover:bg-white/[0.02] transition-colors" @click="toggleOrder(order.id)">
+                <div>
+                  <div class="flex items-center gap-3 mb-2">
+                    <p class="text-white font-display font-bold uppercase">Заказ #{{ order.id }}</p>
+                    <StatusBadge :status="order.status" kind="order" />
+                  </div>
+                  <p class="text-gray-500 text-sm">{{ order.items.length }} поз. · {{ formatDate(order.created_at) }}</p>
+                </div>
+                <div class="flex items-center gap-4">
+                  <span class="text-primary font-display font-bold text-xl">{{ order.total.toLocaleString('ru-RU') }} ₽</span>
+                  <span class="text-gray-600">{{ isExpanded(order.id) ? 'Свернуть' : 'Подробнее' }}</span>
+                </div>
+              </button>
+
+              <div v-if="isExpanded(order.id)" class="border-t border-white/5 p-5 space-y-5">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase mb-1">Оплата</p>
+                    <p class="text-white font-bold">{{ paymentMethodLabel(order.payment_method) }}</p>
+                    <p class="text-gray-500 text-sm">{{ paymentStatusLabel(order.payment_status) }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase mb-1">Пункт выдачи</p>
+                    <p class="text-white font-bold">{{ order.pickup_point?.name || 'Уточнит менеджер' }}</p>
+                    <p class="text-gray-500 text-sm">{{ order.pickup_point?.address || 'Адрес будет согласован' }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase mb-1">Готовность</p>
+                    <p class="text-white font-bold">{{ formatDate(order.pickup_ready_at) }}</p>
+                    <p class="text-gray-500 text-sm">Бронь: {{ order.reservations?.[0]?.status === 'active' ? 'активна' : 'по статусу заказа' }}</p>
+                  </div>
+                </div>
+
+                <div class="space-y-2">
+                  <div v-for="item in order.items" :key="item.id" class="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0">
+                    <span class="text-gray-300">{{ item.name }} <span class="text-gray-600">× {{ item.quantity }}</span></span>
+                    <span class="text-white font-display font-bold">{{ (item.price * item.quantity).toLocaleString('ru-RU') }} ₽</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section v-show="activeTab === 'sales'" class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <h2 class="text-3xl font-display font-bold text-white uppercase">Заявки на покупку</h2>
+              <RouterLink to="/catalog" class="filter-chip">Оставить заявку</RouterLink>
+            </div>
+            <div v-if="!salesRequests.length" class="empty-panel">У вас пока нет заявок на покупку.</div>
+            <article v-for="request in salesRequests" v-else :key="request.id" class="bg-dark-lighter border border-white/5 p-5">
+              <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                <div>
+                  <p class="text-white font-display font-bold uppercase">#{{ request.id }} · {{ salesTypeLabel(request.type) }}</p>
+                  <p class="text-gray-300 mt-2">{{ request.motorcycle ? `${request.motorcycle.brand} ${request.motorcycle.model}` : 'Подбор техники' }}</p>
+                  <p class="text-gray-600 text-sm mt-1">{{ formatDate(request.created_at) }}</p>
+                </div>
+                <StatusBadge :status="request.status" kind="sales" />
+              </div>
+              <p v-if="request.comment" class="text-gray-500 text-sm mt-4">{{ request.comment }}</p>
+            </article>
+          </section>
+
+          <section v-show="activeTab === 'service'" class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <h2 class="text-3xl font-display font-bold text-white uppercase">Записи на сервис</h2>
+              <RouterLink to="/service" class="filter-chip">Записаться</RouterLink>
+            </div>
+            <div v-if="!serviceRequests.length" class="empty-panel">У вас пока нет записей на сервис.</div>
+            <article v-for="request in serviceRequests" v-else :key="request.id" class="bg-dark-lighter border border-white/5 p-5">
+              <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                <div>
+                  <p class="text-white font-display font-bold uppercase">#{{ request.id }} · {{ request.service_type }}</p>
+                  <p class="text-gray-300 mt-2">{{ request.motorcycle_model }}</p>
+                  <p class="text-gray-600 text-sm mt-1">Дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
+                </div>
+                <StatusBadge :status="request.status" kind="service" />
+              </div>
+              <p v-if="request.comment" class="text-gray-500 text-sm mt-4">{{ request.comment }}</p>
+            </article>
+          </section>
+
+          <section v-show="activeTab === 'notifications'" class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <h2 class="text-3xl font-display font-bold text-white uppercase">Уведомления</h2>
+              <button type="button" class="filter-chip" :disabled="!unreadNotificationsCount" @click="markNotificationsRead">Отметить прочитанными</button>
+            </div>
+            <div v-if="!notifications.length" class="empty-panel">Пока нет уведомлений по заказам.</div>
+            <article v-for="notification in notifications" v-else :key="notification.id" class="bg-dark-lighter border p-5" :class="notification.is_read ? 'border-white/5' : 'border-primary/40'">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-white font-display font-bold uppercase">{{ notification.title }}</p>
+                  <p class="text-gray-500 text-sm mt-2">{{ notification.message }}</p>
+                  <p class="text-gray-600 text-xs mt-3">{{ formatDate(notification.created_at) }}</p>
+                </div>
                 <span v-if="!notification.is_read" class="text-[10px] text-primary font-bold uppercase tracking-wider">Новое</span>
               </div>
-              <p class="text-gray-400 text-sm leading-relaxed">{{ notification.message }}</p>
-              <p class="text-gray-600 text-xs mt-3">{{ new Date(notification.created_at).toLocaleString('ru-RU') }}</p>
             </article>
-          </div>
-        </section>
-
-        <div v-if="!loading" class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-14">
-          <section id="profile-sales">
-            <div class="flex items-center justify-between mb-6">
-              <h2 class="text-2xl md:text-3xl font-bold font-display text-white uppercase">Заявки на покупку</h2>
-              <RouterLink to="/catalog" class="text-xs font-bold uppercase tracking-wider text-primary hover:text-white transition-colors">Новая заявка</RouterLink>
-            </div>
-
-            <div v-if="!salesRequests.length" class="bg-dark-lighter border border-white/5 p-8">
-              <p class="text-white font-display font-bold uppercase mb-2">У вас пока нет заявок</p>
-              <p class="text-gray-500 text-sm">Откройте карточку мотоцикла и нажмите “Оставить заявку”.</p>
-            </div>
-
-            <div v-else class="space-y-4">
-              <article v-for="request in salesRequests" :key="request.id" class="bg-dark-lighter border border-white/5 p-5 hover:border-primary/30 transition-colors">
-                <div class="flex items-start justify-between gap-4 mb-4">
-                  <div>
-                    <p class="text-white font-display font-bold uppercase">#{{ request.id }} · {{ salesTypeLabel(request.type) }}</p>
-                    <p class="text-sm text-gray-600">{{ new Date(request.created_at).toLocaleString('ru-RU') }}</p>
-                  </div>
-                  <StatusBadge :status="request.status" kind="sales" />
-                </div>
-                <p class="text-gray-300 font-medium">{{ request.motorcycle ? `${request.motorcycle.brand} ${request.motorcycle.model}` : 'Консультация по подбору техники' }}</p>
-                <p v-if="request.comment" class="text-sm text-gray-500 mt-2 line-clamp-2">{{ request.comment }}</p>
-              </article>
-            </div>
           </section>
-
-          <section id="profile-service">
-            <div class="flex items-center justify-between mb-6">
-              <h2 class="text-2xl md:text-3xl font-bold font-display text-white uppercase">Сервисные заявки</h2>
-              <RouterLink to="/service" class="text-xs font-bold uppercase tracking-wider text-primary hover:text-white transition-colors">Записаться</RouterLink>
-            </div>
-
-            <div v-if="!serviceRequests.length" class="bg-dark-lighter border border-white/5 p-8">
-              <p class="text-white font-display font-bold uppercase mb-2">У вас пока нет сервисных записей</p>
-              <p class="text-gray-500 text-sm">Запишитесь на сервис, чтобы отслеживать статус обслуживания.</p>
-            </div>
-
-            <div v-else class="space-y-4">
-              <article v-for="request in serviceRequests" :key="request.id" class="bg-dark-lighter border border-white/5 p-5 hover:border-primary/30 transition-colors">
-                <div class="flex items-start justify-between gap-4 mb-4">
-                  <div>
-                    <p class="text-white font-display font-bold uppercase">#{{ request.id }} · {{ request.service_type }}</p>
-                    <p class="text-sm text-gray-600">{{ new Date(request.created_at).toLocaleString('ru-RU') }}</p>
-                  </div>
-                  <StatusBadge :status="request.status" kind="service" />
-                </div>
-                <p class="text-gray-300 font-medium">{{ request.motorcycle_model }}</p>
-                <p class="text-sm text-gray-500 mt-2">Желаемая дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
-              </article>
-            </div>
-          </section>
-        </div>
-
-        <div id="profile-orders" class="flex items-center justify-between mb-8" v-if="!loading">
-          <h2 class="text-3xl font-bold font-display text-white uppercase">История заказов</h2>
-          <div class="h-px flex-1 bg-white/5 ml-6" />
-        </div>
-
-        <div v-if="!loading && !orders.length" class="bg-dark-lighter border border-white/5 p-16 text-center">
-          <div class="w-20 h-20 mx-auto mb-6 bg-white/5 flex items-center justify-center">
-            <svg class="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
-          </div>
-          <h3 class="text-xl font-display font-bold text-white uppercase mb-2">У вас пока нет заказов</h3>
-          <p class="text-gray-500 mb-8 max-w-md mx-auto">Перейдите в каталог и выберите технику, которая подойдёт именно вам</p>
-          <RouterLink to="/catalog" class="btn btn-primary"><span>Перейти в каталог</span></RouterLink>
-        </div>
-
-        <div v-else-if="!loading" class="space-y-4">
-          <div v-for="order in orders" :key="order.id" class="bg-dark-lighter border border-white/5 overflow-hidden hover:border-white/10 transition-colors">
-            <div class="p-5 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between cursor-pointer hover:bg-white/[0.02] transition-colors" @click="toggleOrder(order.id)">
-              <div class="flex items-center gap-4 mb-3 md:mb-0">
-                <div
-                  class="w-10 h-10 flex items-center justify-center text-sm font-display font-bold"
-                  :class="{
-                    'bg-blue-500/10 text-blue-400 border border-blue-500/20': order.status === 'new',
-                    'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20': order.status === 'processing',
-                    'bg-orange-500/10 text-orange-400 border border-orange-500/20': order.status === 'approved',
-                    'bg-primary/10 text-primary border border-primary/30': order.status === 'ready_for_pickup',
-                    'bg-green-500/10 text-green-400 border border-green-500/20': order.status === 'completed',
-                    'bg-red-500/10 text-red-400 border border-red-500/20': order.status === 'cancelled',
-                  }"
-                >
-                  #{{ order.id }}
-                </div>
-                <div>
-                  <h3 class="text-base font-bold font-display text-white uppercase">{{ order.items.length }} товаров</h3>
-                  <p class="text-sm text-gray-600">{{ new Date(order.created_at).toLocaleString('ru-RU') }}</p>
-                </div>
-              </div>
-
-              <div class="flex items-center gap-4 md:gap-6">
-                <StatusBadge :status="order.status" kind="order" />
-                <span class="text-xl font-bold text-primary font-display">{{ order.total.toLocaleString('ru-RU') }} ₽</span>
-                <svg class="w-5 h-5 text-gray-600 transform transition-transform" :class="isExpanded(order.id) ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-              </div>
-            </div>
-
-            <div v-if="isExpanded(order.id)" class="border-t border-white/5">
-              <div class="p-5 md:p-6 space-y-3">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Оплата</p>
-                    <p class="text-white text-sm font-bold">{{ paymentMethodLabel(order.payment_method) }}</p>
-                    <p class="text-gray-500 text-xs mt-1">{{ paymentStatusLabel(order.payment_status) }}</p>
-                  </div>
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Пункт выдачи</p>
-                    <p class="text-white text-sm font-bold">{{ order.pickup_point?.name || 'Уточнит менеджер' }}</p>
-                    <p class="text-gray-500 text-xs mt-1">{{ order.pickup_point?.address || 'Адрес будет согласован' }}</p>
-                  </div>
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Готовность</p>
-                    <p class="text-white text-sm font-bold">{{ order.pickup_ready_at ? new Date(order.pickup_ready_at).toLocaleString('ru-RU') : 'После подтверждения' }}</p>
-                    <p class="text-gray-500 text-xs mt-1">Бронь: {{ order.reservations?.[0]?.status === 'active' ? 'активна' : 'по статусу заказа' }}</p>
-                  </div>
-                </div>
-                <div v-for="item in order.items" :key="item.id" class="flex justify-between items-center py-2 border-b border-white/5 last:border-0">
-                  <div class="flex items-center gap-3">
-                    <span class="text-white font-medium">{{ item.name }}</span>
-                    <span class="text-xs px-2 py-0.5 bg-white/5 text-gray-500">x{{ item.quantity }}</span>
-                  </div>
-                  <span class="text-primary font-bold font-display">{{ (item.price * item.quantity).toLocaleString('ru-RU') }} ₽</span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
-    </div>
+    </main>
   </div>
 </template>
