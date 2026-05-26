@@ -90,6 +90,8 @@ const tabs: Array<{ id: AdminTab; label: string }> = [
 const orderStatusOptions: Array<{ value: Order['status']; label: string }> = [
   { value: 'new', label: 'Новый' },
   { value: 'processing', label: 'В обработке' },
+  { value: 'approved', label: 'Подтверждён' },
+  { value: 'ready_for_pickup', label: 'Готов к выдаче' },
   { value: 'completed', label: 'Завершён' },
   { value: 'cancelled', label: 'Отменён' },
 ];
@@ -180,6 +182,50 @@ const unavailableMotorcycles = computed(() => motorcycles.value.filter((moto) =>
 
 function formatCurrency(value: number): string {
   return `${Number(value || 0).toLocaleString('ru-RU')} ₽`;
+}
+
+function paymentMethodLabel(method?: Order['payment_method']): string {
+  switch (method) {
+    case 'card_pickup':
+      return 'Картой при получении';
+    case 'online_mock':
+      return 'Онлайн-оплата';
+    case 'credit_request':
+      return 'Рассрочка / кредит';
+    case 'cash_pickup':
+      return 'Наличными при получении';
+    default:
+      return 'Не указан';
+  }
+}
+
+function paymentStatusLabel(status?: Order['payment_status']): string {
+  switch (status) {
+    case 'paid':
+      return 'Оплачено';
+    case 'failed':
+      return 'Ошибка оплаты';
+    case 'refunded':
+      return 'Возврат';
+    case 'pending':
+      return 'Ожидает оплаты';
+    default:
+      return 'Не указан';
+  }
+}
+
+function reservationLabel(order: Order): string {
+  const active = order.reservations?.find((reservation) => reservation.status === 'active');
+
+  if (active?.expires_at) {
+    return `Активна до ${new Date(active.expires_at).toLocaleDateString('ru-RU')}`;
+  }
+
+  if (active) {
+    return 'Активна';
+  }
+
+  return 'Нет активной брони';
 }
 
 function productGroupKey(moto: Motorcycle): string {
@@ -780,6 +826,28 @@ onMounted(loadDashboard);
                 </div>
               </div>
               <div class="mt-5 border-t border-white/5 pt-4 space-y-2">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Оплата</p>
+                    <p class="text-white text-sm font-bold">{{ paymentMethodLabel(order.payment_method) }}</p>
+                    <p class="text-gray-500 text-xs mt-1">{{ paymentStatusLabel(order.payment_status) }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Выдача</p>
+                    <p class="text-white text-sm font-bold">{{ order.pickup_point?.name || 'Не выбран' }}</p>
+                    <p class="text-gray-500 text-xs mt-1">{{ order.pickup_point?.address || 'Адрес не указан' }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Готовность</p>
+                    <p class="text-white text-sm font-bold">{{ order.pickup_ready_at ? new Date(order.pickup_ready_at).toLocaleString('ru-RU') : 'Не назначена' }}</p>
+                    <p class="text-gray-500 text-xs mt-1">Статус меняется менеджером</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Бронь</p>
+                    <p class="text-white text-sm font-bold">{{ reservationLabel(order) }}</p>
+                    <p class="text-gray-500 text-xs mt-1">{{ order.reservations?.length ?? 0 }} позиций</p>
+                  </div>
+                </div>
                 <div v-for="item in order.items" :key="item.id" class="flex items-center justify-between text-sm">
                   <span class="text-gray-300">{{ item.name }} <span class="text-gray-600">× {{ item.quantity }}</span></span>
                   <span class="text-white font-bold font-display">{{ formatCurrency(item.price * item.quantity) }}</span>

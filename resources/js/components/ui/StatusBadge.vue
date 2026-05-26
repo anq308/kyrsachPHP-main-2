@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<Props>(), {
 const labels: Record<string, string> = {
   new: 'Новая',
   processing: 'В обработке',
+  ready_for_pickup: 'Готов к выдаче',
   completed: 'Завершён',
   cancelled: 'Отменена',
   in_progress: 'В работе',
@@ -34,6 +35,7 @@ const classes = computed(() => {
     processing: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-300',
     in_progress: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-300',
     approved: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+    ready_for_pickup: 'border-primary/40 bg-primary/10 text-primary',
     confirmed: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
     in_service: 'border-primary/40 bg-primary/10 text-primary',
     completed: 'border-green-500/30 bg-green-500/10 text-green-300',
@@ -48,7 +50,19 @@ const classes = computed(() => {
   return palette[props.status] ?? 'border-white/10 bg-white/5 text-gray-300';
 });
 
-const text = computed(() => labels[props.status] ?? props.status);
+const text = computed(() => {
+  if (props.kind === 'order') {
+    const orderLabels: Record<string, string> = {
+      new: 'Новый',
+      approved: 'Подтверждён',
+      cancelled: 'Отменён',
+    };
+
+    return orderLabels[props.status] ?? labels[props.status] ?? props.status;
+  }
+
+  return labels[props.status] ?? props.status;
+});
 </script>
 
 <template>

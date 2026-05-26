@@ -57,6 +57,36 @@ export interface OrderItem {
   quantity: number;
 }
 
+export interface PickupPoint {
+  id: number;
+  name: string;
+  address: string;
+  phone: string | null;
+  work_hours: string | null;
+  is_active: boolean;
+}
+
+export interface Reservation {
+  id: number;
+  user_id: number | null;
+  order_id: number;
+  motorcycle_id: number;
+  status: 'active' | 'released' | 'expired' | 'completed';
+  expires_at: string | null;
+  released_at: string | null;
+  motorcycle?: Motorcycle | null;
+}
+
+export interface ClientNotification {
+  id: number;
+  user_id: number;
+  title: string;
+  message: string;
+  type: string;
+  is_read: boolean;
+  created_at: string;
+}
+
 export interface Order {
   id: number;
   user_id: number | null;
@@ -66,7 +96,13 @@ export interface Order {
   address: string | null;
   comment: string | null;
   total: number;
-  status: 'new' | 'processing' | 'completed' | 'cancelled';
+  status: 'new' | 'processing' | 'approved' | 'ready_for_pickup' | 'completed' | 'cancelled';
+  payment_method?: 'cash_pickup' | 'card_pickup' | 'online_mock' | 'credit_request';
+  payment_status?: 'pending' | 'paid' | 'failed' | 'refunded';
+  pickup_point_id?: number | null;
+  pickup_ready_at?: string | null;
+  pickup_point?: PickupPoint | null;
+  reservations?: Reservation[];
   items: OrderItem[];
   created_at: string;
 }

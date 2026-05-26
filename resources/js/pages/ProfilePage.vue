@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
-import type { Order, SalesRequest, ServiceRequest, User } from '../types';
+import type { ClientNotification, Order, SalesRequest, ServiceRequest, User } from '../types';
 
 const router = useRouter();
 
@@ -13,6 +13,8 @@ const user = ref<User | null>(null);
 const orders = ref<Order[]>([]);
 const salesRequests = ref<SalesRequest[]>([]);
 const serviceRequests = ref<ServiceRequest[]>([]);
+const notifications = ref<ClientNotification[]>([]);
+const unreadNotificationsCount = ref(0);
 const favoritesCount = ref(0);
 const expandedOrders = ref<number[]>([]);
 
@@ -28,18 +30,33 @@ function isExpanded(id: number): boolean {
   return expandedOrders.value.includes(id);
 }
 
-function statusLabel(status: Order['status']): string {
-  switch (status) {
-    case 'new':
-      return 'Новый';
-    case 'processing':
-      return 'В обработке';
-    case 'completed':
-      return 'Завершён';
-    case 'cancelled':
-      return 'Отменён';
+function paymentMethodLabel(method?: Order['payment_method']): string {
+  switch (method) {
+    case 'card_pickup':
+      return 'Картой при получении';
+    case 'online_mock':
+      return 'Онлайн-оплата';
+    case 'credit_request':
+      return 'Рассрочка / кредит';
+    case 'cash_pickup':
+      return 'Наличными при получении';
     default:
-      return status;
+      return 'Не указан';
+  }
+}
+
+function paymentStatusLabel(status?: Order['payment_status']): string {
+  switch (status) {
+    case 'paid':
+      return 'Оплачено';
+    case 'failed':
+      return 'Ошибка оплаты';
+    case 'refunded':
+      return 'Возврат';
+    case 'pending':
+      return 'Ожидает оплаты';
+    default:
+      return 'Не указан';
   }
 }
 
@@ -69,12 +86,24 @@ async function loadProfile() {
     orders.value = data.orders ?? [];
     salesRequests.value = data.sales_requests ?? [];
     serviceRequests.value = data.service_requests ?? [];
+    notifications.value = data.notifications ?? [];
+    unreadNotificationsCount.value = Number(data.unread_notifications_count ?? 0);
     favoritesCount.value = Number(data.favorites_count ?? 0);
   } catch {
     await router.push('/login');
   } finally {
     loading.value = false;
   }
+}
+
+async function markNotificationsRead() {
+  if (!unreadNotificationsCount.value) {
+    return;
+  }
+
+  await api.patch('/profile/notifications/read');
+  notifications.value = notifications.value.map((notification) => ({ ...notification, is_read: true }));
+  unreadNotificationsCount.value = 0;
 }
 
 onMounted(loadProfile);
@@ -113,6 +142,7 @@ onMounted(loadProfile);
               <div>
                 <p class="text-xs text-gray-600 uppercase tracking-wider font-bold mb-1">Заказов</p>
                 <p class="text-3xl font-display font-bold text-white">{{ orders.length }}</p>
+                <p v-if="unreadNotificationsCount" class="text-xs text-primary mt-1">{{ unreadNotificationsCount }} новых уведомлений</p>
               </div>
               <div class="w-12 h-12 bg-primary/10 flex items-center justify-center text-primary">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2" /></svg>
@@ -223,6 +253,40 @@ onMounted(loadProfile);
           </RouterLink>
         </div>
 
+        <section v-if="!loading" class="bg-dark-lighter border border-white/5 p-6 mb-12">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
+            <div>
+              <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-2">Уведомления</p>
+              <h2 class="text-2xl font-display font-bold text-white uppercase italic">Статусы от менеджера</h2>
+            </div>
+            <button
+              type="button"
+              class="filter-chip"
+              :disabled="!unreadNotificationsCount"
+              @click="markNotificationsRead"
+            >
+              Отметить прочитанными
+            </button>
+          </div>
+
+          <div v-if="!notifications.length" class="empty-panel">Пока нет уведомлений по заказам.</div>
+          <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <article
+              v-for="notification in notifications"
+              :key="notification.id"
+              class="bg-dark border p-4 transition-colors"
+              :class="notification.is_read ? 'border-white/5' : 'border-primary/40'"
+            >
+              <div class="flex items-start justify-between gap-3 mb-2">
+                <p class="text-white font-display font-bold uppercase">{{ notification.title }}</p>
+                <span v-if="!notification.is_read" class="text-[10px] text-primary font-bold uppercase tracking-wider">Новое</span>
+              </div>
+              <p class="text-gray-400 text-sm leading-relaxed">{{ notification.message }}</p>
+              <p class="text-gray-600 text-xs mt-3">{{ new Date(notification.created_at).toLocaleString('ru-RU') }}</p>
+            </article>
+          </div>
+        </section>
+
         <div v-if="!loading" class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-14">
           <section id="profile-sales">
             <div class="flex items-center justify-between mb-6">
@@ -300,6 +364,8 @@ onMounted(loadProfile);
                   :class="{
                     'bg-blue-500/10 text-blue-400 border border-blue-500/20': order.status === 'new',
                     'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20': order.status === 'processing',
+                    'bg-orange-500/10 text-orange-400 border border-orange-500/20': order.status === 'approved',
+                    'bg-primary/10 text-primary border border-primary/30': order.status === 'ready_for_pickup',
                     'bg-green-500/10 text-green-400 border border-green-500/20': order.status === 'completed',
                     'bg-red-500/10 text-red-400 border border-red-500/20': order.status === 'cancelled',
                   }"
@@ -313,17 +379,7 @@ onMounted(loadProfile);
               </div>
 
               <div class="flex items-center gap-4 md:gap-6">
-                <span
-                  class="px-3 py-1 text-xs font-bold uppercase tracking-wider"
-                  :class="{
-                    'bg-blue-500/10 text-blue-400 border border-blue-500/20': order.status === 'new',
-                    'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20': order.status === 'processing',
-                    'bg-green-500/10 text-green-400 border border-green-500/20': order.status === 'completed',
-                    'bg-red-500/10 text-red-400 border border-red-500/20': order.status === 'cancelled',
-                  }"
-                >
-                  {{ statusLabel(order.status) }}
-                </span>
+                <StatusBadge :status="order.status" kind="order" />
                 <span class="text-xl font-bold text-primary font-display">{{ order.total.toLocaleString('ru-RU') }} ₽</span>
                 <svg class="w-5 h-5 text-gray-600 transform transition-transform" :class="isExpanded(order.id) ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
               </div>
@@ -331,6 +387,23 @@ onMounted(loadProfile);
 
             <div v-if="isExpanded(order.id)" class="border-t border-white/5">
               <div class="p-5 md:p-6 space-y-3">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Оплата</p>
+                    <p class="text-white text-sm font-bold">{{ paymentMethodLabel(order.payment_method) }}</p>
+                    <p class="text-gray-500 text-xs mt-1">{{ paymentStatusLabel(order.payment_status) }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Пункт выдачи</p>
+                    <p class="text-white text-sm font-bold">{{ order.pickup_point?.name || 'Уточнит менеджер' }}</p>
+                    <p class="text-gray-500 text-xs mt-1">{{ order.pickup_point?.address || 'Адрес будет согласован' }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Готовность</p>
+                    <p class="text-white text-sm font-bold">{{ order.pickup_ready_at ? new Date(order.pickup_ready_at).toLocaleString('ru-RU') : 'После подтверждения' }}</p>
+                    <p class="text-gray-500 text-xs mt-1">Бронь: {{ order.reservations?.[0]?.status === 'active' ? 'активна' : 'по статусу заказа' }}</p>
+                  </div>
+                </div>
                 <div v-for="item in order.items" :key="item.id" class="flex justify-between items-center py-2 border-b border-white/5 last:border-0">
                   <div class="flex items-center gap-3">
                     <span class="text-white font-medium">{{ item.name }}</span>

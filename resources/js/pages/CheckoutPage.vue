@@ -6,7 +6,7 @@ import AlertMessage from '../components/ui/AlertMessage.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
 import PageHero from '../components/ui/PageHero.vue';
 import { loadSession, sessionState } from '../session';
-import type { CartPayload } from '../types';
+import type { CartPayload, PickupPoint } from '../types';
 
 const router = useRouter();
 
@@ -15,6 +15,7 @@ const submitting = ref(false);
 const errorText = ref('');
 const successText = ref('');
 const cart = ref<CartPayload>({ items: [], total: 0, count: 0 });
+const pickupPoints = ref<PickupPoint[]>([]);
 
 const form = reactive({
   name: '',
@@ -22,7 +23,16 @@ const form = reactive({
   email: '',
   address: '',
   comment: '',
+  payment_method: 'cash_pickup',
+  pickup_point_id: '',
 });
+
+const paymentMethods = [
+  { value: 'cash_pickup', label: 'Наличными при получении', note: 'Оплата в кассе мотосалона или пункта выдачи.' },
+  { value: 'card_pickup', label: 'Картой при получении', note: 'Банковская карта при выдаче техники.' },
+  { value: 'online_mock', label: 'Онлайн-оплата', note: 'Демо-оплата для дипломного проекта.' },
+  { value: 'credit_request', label: 'Заявка на рассрочку', note: 'Менеджер свяжется для согласования условий.' },
+];
 
 async function loadCart() {
   loading.value = true;
@@ -38,13 +48,25 @@ async function loadCart() {
   }
 }
 
+async function loadPickupPoints() {
+  const { data } = await api.get('/pickup-points');
+  pickupPoints.value = data.pickup_points ?? [];
+
+  if (!form.pickup_point_id && pickupPoints.value.length) {
+    form.pickup_point_id = String(pickupPoints.value[0].id);
+  }
+}
+
 async function submitOrder() {
   errorText.value = '';
   successText.value = '';
   submitting.value = true;
 
   try {
-    const { data } = await api.post('/checkout', form);
+    const { data } = await api.post('/checkout', {
+      ...form,
+      pickup_point_id: Number(form.pickup_point_id),
+    });
     successText.value = data.message ?? 'Заказ оформлен.';
     await loadSession();
     setTimeout(async () => {
@@ -67,7 +89,7 @@ onMounted(async () => {
     form.email = sessionState.user.email ?? '';
   }
 
-  await loadCart();
+  await Promise.all([loadCart(), loadPickupPoints()]);
 });
 </script>
 
@@ -122,6 +144,45 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
+
+            <div class="bg-dark-lighter border border-white/5 p-8 relative overflow-hidden mb-8">
+              <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-transparent" />
+
+              <h2 class="text-2xl font-bold font-display text-white mb-8 uppercase italic">Оплата и выдача</h2>
+
+              <div class="space-y-6">
+                <div>
+                  <label for="payment_method" class="block text-sm font-medium text-gray-500 mb-2 uppercase tracking-wide">Способ оплаты *</label>
+                  <select id="payment_method" v-model="form.payment_method" required class="w-full bg-dark border border-white/10 text-white px-4 py-3 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors">
+                    <option v-for="method in paymentMethods" :key="method.value" :value="method.value">{{ method.label }}</option>
+                  </select>
+                  <p class="text-xs text-gray-600 mt-2">{{ paymentMethods.find((method) => method.value === form.payment_method)?.note }}</p>
+                </div>
+
+                <div>
+                  <label for="pickup_point_id" class="block text-sm font-medium text-gray-500 mb-2 uppercase tracking-wide">Где забрать технику *</label>
+                  <select id="pickup_point_id" v-model="form.pickup_point_id" required class="w-full bg-dark border border-white/10 text-white px-4 py-3 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors">
+                    <option value="" disabled>Выберите пункт выдачи</option>
+                    <option v-for="point in pickupPoints" :key="point.id" :value="String(point.id)">{{ point.name }}</option>
+                  </select>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <button
+                    v-for="point in pickupPoints"
+                    :key="point.id"
+                    type="button"
+                    class="text-left bg-dark border p-4 transition-all hover:border-primary/40"
+                    :class="form.pickup_point_id === String(point.id) ? 'border-primary/60 shadow-lg shadow-primary/10' : 'border-white/10'"
+                    @click="form.pickup_point_id = String(point.id)"
+                  >
+                    <span class="block text-white font-display font-bold uppercase text-sm mb-2">{{ point.name }}</span>
+                    <span class="block text-gray-500 text-sm leading-relaxed">{{ point.address }}</span>
+                    <span class="block text-gray-600 text-xs mt-2">{{ point.work_hours || 'График уточнит менеджер' }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="lg:col-span-5">
@@ -152,7 +213,7 @@ onMounted(async () => {
                 <span>{{ submitting ? 'Оформление...' : 'Подтвердить заказ' }}</span>
               </button>
 
-              <p class="text-xs text-center text-gray-600 mt-4">Нажимая кнопку, вы соглашаетесь с условиями покупки</p>
+              <p class="text-xs text-center text-gray-600 mt-4">После подтверждения менеджер проверит наличие, закрепит бронь и отправит уведомление в личный кабинет.</p>
             </div>
           </div>
         </form>
