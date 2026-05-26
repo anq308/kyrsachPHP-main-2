@@ -18,14 +18,16 @@ Route::prefix('api')->group(function () {
     Route::get('/compare', [SpaApiController::class, 'compareIndex']);
     Route::post('/compare/{id}', [SpaApiController::class, 'toggleCompare']);
 
-    Route::post('/contact', [SpaApiController::class, 'contact']);
-    Route::post('/applications', [SpaApiController::class, 'storeSalesRequest']);
-    Route::post('/sales-requests', [SpaApiController::class, 'storeSalesRequest']);
-    Route::post('/service-requests', [SpaApiController::class, 'storeServiceRequest']);
+    Route::middleware('throttle:10,1')->group(function () {
+        Route::post('/contact', [SpaApiController::class, 'contact']);
+        Route::post('/applications', [SpaApiController::class, 'storeSalesRequest']);
+        Route::post('/sales-requests', [SpaApiController::class, 'storeSalesRequest']);
+        Route::post('/service-requests', [SpaApiController::class, 'storeServiceRequest']);
+    });
 
     Route::get('/me', [SpaApiController::class, 'me']);
-    Route::post('/login', [SpaApiController::class, 'login']);
-    Route::post('/register', [SpaApiController::class, 'register']);
+    Route::post('/login', [SpaApiController::class, 'login'])->middleware('throttle:5,1');
+    Route::post('/register', [SpaApiController::class, 'register'])->middleware('throttle:5,1');
     Route::post('/logout', [SpaApiController::class, 'logout']);
 
     Route::middleware('auth')->group(function () {

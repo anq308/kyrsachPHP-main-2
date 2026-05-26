@@ -10,8 +10,10 @@ class AdminMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (!$request->user() || !$request->user()->is_admin) {
-            return redirect()->route('home')->with('error', 'Доступ запрещён.');
+        if (! $request->user() || ! $request->user()->is_admin) {
+            return response()->json([
+                'message' => 'Доступ запрещён.',
+            ], 403);
         }
 
         return $next($request);
