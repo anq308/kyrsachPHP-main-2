@@ -3,6 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CheckoutRequest;
+use App\Http\Requests\ContactRequest;
+use App\Http\Requests\LoginRequest;
+use App\Http\Requests\RegisterRequest;
+use App\Http\Requests\StoreMotorcycleRequest;
+use App\Http\Requests\StoreSalesRequestRequest;
+use App\Http\Requests\StoreServiceRequestRequest;
+use App\Http\Requests\UpdateOrderStatusRequest;
+use App\Http\Requests\UpdateSalesRequestStatusRequest;
+use App\Http\Requests\UpdateServiceRequestStatusRequest;
 use App\Models\ContactMessage;
 use App\Models\Favorite;
 use App\Models\Motorcycle;
@@ -243,7 +253,7 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function checkout(Request $request): JsonResponse
+    public function checkout(CheckoutRequest $request): JsonResponse
     {
         $cart = session()->get('cart', []);
 
@@ -251,13 +261,7 @@ class SpaApiController extends Controller
             return response()->json(['message' => 'Корзина пуста!'], 422);
         }
 
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'phone' => 'required|string|max:20',
-            'email' => 'nullable|email|max:255',
-            'address' => 'nullable|string|max:500',
-            'comment' => 'nullable|string|max:1000',
-        ]);
+        $validated = $request->validated();
 
         $total = 0;
         foreach ($cart as $item) {
@@ -297,14 +301,9 @@ class SpaApiController extends Controller
         ], 201);
     }
 
-    public function contact(Request $request): JsonResponse
+    public function contact(ContactRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'phone' => 'nullable|string|max:20',
-            'email' => 'nullable|email|max:255',
-            'message' => 'required|string|max:2000',
-        ]);
+        $validated = $request->validated();
 
         ContactMessage::create($validated);
 
@@ -313,16 +312,9 @@ class SpaApiController extends Controller
         ], 201);
     }
 
-    public function storeSalesRequest(Request $request): JsonResponse
+    public function storeSalesRequest(StoreSalesRequestRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'motorcycle_id' => 'nullable|exists:motorcycles,id',
-            'name' => 'required|string|max:255',
-            'phone' => 'required|string|max:30',
-            'email' => 'nullable|email|max:255',
-            'type' => 'nullable|in:'.implode(',', SalesRequest::TYPES),
-            'comment' => 'nullable|string|max:2000',
-        ]);
+        $validated = $request->validated();
 
         $validated['type'] = $validated['type'] ?? 'consultation';
         $validated['status'] = 'new';
@@ -358,17 +350,9 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function storeServiceRequest(Request $request): JsonResponse
+    public function storeServiceRequest(StoreServiceRequestRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'phone' => 'required|string|max:30',
-            'email' => 'nullable|email|max:255',
-            'motorcycle_model' => 'required|string|max:255',
-            'service_type' => 'required|string|max:255',
-            'preferred_date' => 'nullable|date',
-            'comment' => 'nullable|string|max:2000',
-        ]);
+        $validated = $request->validated();
 
         $validated['status'] = 'new';
         $validated['user_id'] = Auth::id();
@@ -409,12 +393,9 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function login(Request $request): JsonResponse
+    public function login(LoginRequest $request): JsonResponse
     {
-        $credentials = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required'],
-        ]);
+        $credentials = $request->validated();
 
         if (! Auth::attempt($credentials)) {
             throw ValidationException::withMessages([
@@ -430,13 +411,9 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function register(Request $request): JsonResponse
+    public function register(RegisterRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
-        ]);
+        $validated = $request->validated();
 
         $user = User::create([
             'name' => $validated['name'],
@@ -556,9 +533,9 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminStoreMotorcycle(Request $request): JsonResponse
+    public function adminStoreMotorcycle(StoreMotorcycleRequest $request): JsonResponse
     {
-        $validated = $request->validate($this->motorcycleRules());
+        $validated = $request->validated();
         $validated['is_available'] = $request->boolean('is_available');
 
         $motorcycle = Motorcycle::create($validated);
@@ -569,9 +546,9 @@ class SpaApiController extends Controller
         ], 201);
     }
 
-    public function adminUpdateMotorcycle(Request $request, string $id): JsonResponse
+    public function adminUpdateMotorcycle(StoreMotorcycleRequest $request, string $id): JsonResponse
     {
-        $validated = $request->validate($this->motorcycleRules());
+        $validated = $request->validated();
         $validated['is_available'] = $request->boolean('is_available');
 
         $motorcycle = Motorcycle::findOrFail($id);
@@ -593,12 +570,8 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminUpdateOrderStatus(Request $request, string $id): JsonResponse
+    public function adminUpdateOrderStatus(UpdateOrderStatusRequest $request, string $id): JsonResponse
     {
-        $request->validate([
-            'status' => 'required|in:new,processing,completed,cancelled',
-        ]);
-
         $order = Order::findOrFail($id);
         $order->update(['status' => $request->input('status')]);
 
@@ -608,12 +581,8 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminUpdateSalesRequestStatus(Request $request, string $id): JsonResponse
+    public function adminUpdateSalesRequestStatus(UpdateSalesRequestStatusRequest $request, string $id): JsonResponse
     {
-        $request->validate([
-            'status' => 'required|in:'.implode(',', SalesRequest::STATUSES),
-        ]);
-
         $salesRequest = SalesRequest::findOrFail($id);
         $salesRequest->update(['status' => $request->input('status')]);
         $salesRequest->load(['user', 'motorcycle']);
@@ -634,12 +603,8 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminUpdateServiceRequestStatus(Request $request, string $id): JsonResponse
+    public function adminUpdateServiceRequestStatus(UpdateServiceRequestStatusRequest $request, string $id): JsonResponse
     {
-        $request->validate([
-            'status' => 'required|in:'.implode(',', ServiceRequest::STATUSES),
-        ]);
-
         $serviceRequest = ServiceRequest::findOrFail($id);
         $serviceRequest->update(['status' => $request->input('status')]);
         $serviceRequest->load('user');
@@ -700,38 +665,6 @@ class SpaApiController extends Controller
             'items' => $items,
             'total' => $total,
             'count' => count($items),
-        ];
-    }
-
-    private function motorcycleRules(): array
-    {
-        return [
-            'brand' => 'required|string|max:255',
-            'model' => 'required|string|max:255',
-            'type' => 'required|string|max:255',
-            'year' => 'required|integer|min:1900|max:'.(date('Y') + 1),
-            'engine_capacity' => 'required|integer',
-            'power' => 'required|integer',
-            'price' => 'required|integer',
-            'description' => 'required|string',
-            'image_url' => [
-                'required',
-                'string',
-                'max:2048',
-                function (string $attribute, mixed $value, \Closure $fail): void {
-                    if (filter_var($value, FILTER_VALIDATE_URL) || str_starts_with($value, '/')) {
-                        return;
-                    }
-
-                    $fail('Поле изображения должно быть абсолютным URL или начинаться с "/".');
-                },
-            ],
-            'is_available' => 'boolean',
-            'transmission' => 'nullable|string|max:255',
-            'cooling' => 'nullable|string|max:255',
-            'fuel_system' => 'nullable|string|max:255',
-            'weight' => 'nullable|integer',
-            'tank_capacity' => 'nullable|numeric',
         ];
     }
 
