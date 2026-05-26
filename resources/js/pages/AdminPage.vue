@@ -22,7 +22,7 @@ interface AdminUser extends User {
   service_requests?: ServiceRequest[];
 }
 
-type AdminTab = 'dashboard' | 'products' | 'orders' | 'sales' | 'service' | 'users' | 'messages';
+type AdminTab = 'dashboard' | 'orders' | 'sales' | 'service' | 'products' | 'users' | 'messages';
 type ProductGroupMode = 'type' | 'brand' | 'availability';
 
 const loading = ref(true);
@@ -30,7 +30,6 @@ const saving = ref(false);
 const errorText = ref('');
 const successText = ref('');
 const activeTab = ref<AdminTab>('dashboard');
-const expandedOrders = ref<number[]>([]);
 
 const searchQuery = ref('');
 const filterStatus = ref<'all' | 'available' | 'unavailable'>('all');
@@ -39,6 +38,7 @@ const selectedProductGroup = ref('all');
 const salesStatusFilter = ref<'all' | SalesRequest['status']>('all');
 const serviceStatusFilter = ref<'all' | ServiceRequest['status']>('all');
 const showProductForm = ref(false);
+const expandedOrders = ref<number[]>([]);
 
 const motorcycles = ref<Motorcycle[]>([]);
 const orders = ref<Order[]>([]);
@@ -78,14 +78,14 @@ const form = reactive({
   tank_capacity: null as number | null,
 });
 
-const tabs: Array<{ id: AdminTab; label: string }> = [
-  { id: 'dashboard', label: 'Дашборд' },
-  { id: 'products', label: 'Товары' },
-  { id: 'orders', label: 'Заказы' },
-  { id: 'sales', label: 'Заявки на покупку' },
-  { id: 'service', label: 'Сервисные заявки' },
-  { id: 'users', label: 'Пользователи' },
-  { id: 'messages', label: 'Сообщения' },
+const tabs: Array<{ id: AdminTab; label: string; hint: string }> = [
+  { id: 'dashboard', label: 'Сводка', hint: 'Что требует внимания' },
+  { id: 'orders', label: 'Заказы', hint: 'Оплата, бронь, выдача' },
+  { id: 'sales', label: 'Покупка', hint: 'Заявки клиентов' },
+  { id: 'service', label: 'Сервис', hint: 'Записи на обслуживание' },
+  { id: 'products', label: 'Товары', hint: 'Склад и каталог' },
+  { id: 'users', label: 'Клиенты', hint: 'Пользователи системы' },
+  { id: 'messages', label: 'Сообщения', hint: 'Обратная связь' },
 ];
 
 const orderStatusOptions: Array<{ value: Order['status']; label: string }> = [
@@ -118,16 +118,23 @@ const serviceStatusOptions: Array<{ value: 'all' | ServiceRequest['status']; lab
 const salesTypeLabels: Record<SalesRequest['type'], string> = {
   purchase: 'Покупка',
   consultation: 'Консультация',
-  availability: 'Уточнение наличия',
+  availability: 'Наличие',
   preorder: 'Предзаказ',
   test_drive: 'Тест-драйв',
 };
 
 const productGroupModes: Array<{ value: ProductGroupMode; label: string }> = [
-  { value: 'type', label: 'По типу' },
-  { value: 'brand', label: 'По бренду' },
-  { value: 'availability', label: 'По наличию' },
+  { value: 'type', label: 'Тип' },
+  { value: 'brand', label: 'Бренд' },
+  { value: 'availability', label: 'Наличие' },
 ];
+
+const activeTabMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
+const urgentOrders = computed(() => orders.value.filter((order) => ['new', 'processing', 'approved'].includes(order.status)));
+const readyOrders = computed(() => orders.value.filter((order) => order.status === 'ready_for_pickup'));
+const newSalesRequests = computed(() => salesRequests.value.filter((request) => request.status === 'new'));
+const newServiceRequests = computed(() => serviceRequests.value.filter((request) => request.status === 'new'));
+const unavailableMotorcycles = computed(() => motorcycles.value.filter((moto) => !moto.is_available));
 
 const filteredMotorcycles = computed(() => {
   const query = searchQuery.value.toLowerCase().trim();
@@ -156,8 +163,6 @@ const inventorySummary = computed(() => {
   };
 });
 
-const productGroupCards = computed(() => groupMotorcycles(filteredMotorcycles.value));
-
 const visibleMotorcycles = computed(() => {
   if (selectedProductGroup.value === 'all') {
     return filteredMotorcycles.value;
@@ -166,6 +171,7 @@ const visibleMotorcycles = computed(() => {
   return filteredMotorcycles.value.filter((moto) => productGroupKey(moto) === selectedProductGroup.value);
 });
 
+const productGroupCards = computed(() => groupMotorcycles(filteredMotorcycles.value));
 const groupedMotorcycles = computed(() => groupMotorcycles(visibleMotorcycles.value));
 
 const filteredSalesRequests = computed(() =>
@@ -176,48 +182,26 @@ const filteredServiceRequests = computed(() =>
   serviceRequests.value.filter((request) => serviceStatusFilter.value === 'all' || request.status === serviceStatusFilter.value),
 );
 
-const dashboardSalesRequests = computed(() => salesRequests.value.filter((request) => request.status === 'new').slice(0, 5));
-const dashboardServiceRequests = computed(() => serviceRequests.value.filter((request) => request.status === 'new').slice(0, 5));
-const latestOrders = computed(() => orders.value.slice(0, 5));
-const unavailableMotorcycles = computed(() => motorcycles.value.filter((moto) => !moto.is_available).slice(0, 5));
-
-const activeTabMeta = computed(() => {
-  const meta: Record<AdminTab, { title: string; description: string }> = {
-    dashboard: {
-      title: 'Рабочая сводка',
-      description: 'Самые важные обращения, заказы и складские сигналы.',
-    },
-    products: {
-      title: 'Склад и каталог',
-      description: 'Группировка товаров, наличие, цены и редактирование карточек.',
-    },
-    orders: {
-      title: 'Заказы клиентов',
-      description: 'Подтверждение, бронь, оплата и выдача техники.',
-    },
-    sales: {
-      title: 'Заявки на покупку',
-      description: 'Консультации, наличие, предзаказы и первичная обработка клиентов.',
-    },
-    service: {
-      title: 'Сервисные заявки',
-      description: 'Записи на обслуживание, диагностику и ремонт техники.',
-    },
-    users: {
-      title: 'Пользователи',
-      description: 'Клиенты, их заказы, заявки и сервисная активность.',
-    },
-    messages: {
-      title: 'Сообщения',
-      description: 'Обратная связь с сайта и входящие обращения.',
-    },
+function tabCount(tab: AdminTab): number {
+  const counts: Record<AdminTab, number> = {
+    dashboard: urgentOrders.value.length + newSalesRequests.value.length + newServiceRequests.value.length,
+    orders: orders.value.length,
+    sales: salesRequests.value.length,
+    service: serviceRequests.value.length,
+    products: motorcycles.value.length,
+    users: users.value.length,
+    messages: messages.value.length,
   };
 
-  return meta[activeTab.value];
-});
+  return counts[tab];
+}
 
 function formatCurrency(value: number): string {
   return `${Number(value || 0).toLocaleString('ru-RU')} ₽`;
+}
+
+function formatDate(value?: string | null): string {
+  return value ? new Date(value).toLocaleString('ru-RU') : 'Не назначено';
 }
 
 function paymentMethodLabel(method?: Order['payment_method']): string {
@@ -257,21 +241,7 @@ function reservationLabel(order: Order): string {
     return `Активна до ${new Date(active.expires_at).toLocaleDateString('ru-RU')}`;
   }
 
-  if (active) {
-    return 'Активна';
-  }
-
-  return 'Нет активной брони';
-}
-
-function toggleOrderDetails(id: number) {
-  expandedOrders.value = expandedOrders.value.includes(id)
-    ? expandedOrders.value.filter((orderId) => orderId !== id)
-    : [...expandedOrders.value, id];
-}
-
-function isOrderExpanded(id: number): boolean {
-  return expandedOrders.value.includes(id);
+  return active ? 'Активна' : 'Нет активной брони';
 }
 
 function productGroupKey(moto: Motorcycle): string {
@@ -321,18 +291,14 @@ function setProductGroupMode(mode: ProductGroupMode) {
   selectedProductGroup.value = 'all';
 }
 
-function tabCount(tab: AdminTab): number {
-  const counts: Record<AdminTab, number> = {
-    dashboard: stats.value.newSalesRequestsCount + stats.value.newServiceRequestsCount,
-    products: motorcycles.value.length,
-    orders: orders.value.length,
-    sales: salesRequests.value.length,
-    service: serviceRequests.value.length,
-    users: users.value.length,
-    messages: messages.value.length,
-  };
+function toggleOrderDetails(id: number) {
+  expandedOrders.value = expandedOrders.value.includes(id)
+    ? expandedOrders.value.filter((orderId) => orderId !== id)
+    : [...expandedOrders.value, id];
+}
 
-  return counts[tab];
+function isOrderExpanded(id: number): boolean {
+  return expandedOrders.value.includes(id);
 }
 
 function resetForm() {
@@ -357,6 +323,7 @@ function resetForm() {
 
 function openCreateMotorcycleForm() {
   resetForm();
+  activeTab.value = 'products';
   showProductForm.value = true;
 }
 
@@ -413,7 +380,6 @@ async function saveMotorcycle() {
 
     successText.value = data.message;
     resetForm();
-    showProductForm.value = false;
     await loadDashboard();
   } catch (error: any) {
     errorText.value = error?.response?.data?.message ?? 'Не удалось сохранить товар.';
@@ -498,243 +464,337 @@ onMounted(loadDashboard);
 </script>
 
 <template>
-  <div>
-    <div class="relative bg-dark overflow-hidden py-10 md:py-12 border-b border-white/5">
-      <div class="absolute inset-0">
-        <div class="absolute inset-0 bg-gradient-to-b from-primary/5 via-dark to-dark" />
-        <div class="absolute top-0 right-0 w-96 h-96 bg-primary/5 blur-3xl" />
-      </div>
-      <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+  <div class="min-h-screen bg-dark">
+    <div class="border-b border-white/5 bg-dark-lighter/50">
+      <div class="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
           <div>
-            <p class="text-primary text-sm font-bold uppercase tracking-[0.25em] mb-3">Рабочее место менеджера</p>
-            <h1 class="text-3xl md:text-5xl font-bold font-display text-white uppercase italic tracking-tight">Админ-панель AVANTIS</h1>
+            <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-2">AVANTIS Manager</p>
+            <h1 class="text-3xl md:text-4xl font-display font-bold text-white uppercase italic">Панель управления</h1>
           </div>
-          <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
-            <button class="bg-dark-lighter border border-white/5 px-4 py-3 text-left" @click="activeTab = 'orders'">
-              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Заказы</span>
-              <span class="text-xl text-white font-display font-bold">{{ stats.ordersCount }}</span>
+
+          <div class="grid grid-cols-3 gap-2 w-full lg:w-auto">
+            <button type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="activeTab = 'orders'">
+              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Заказы в работе</span>
+              <span class="text-2xl text-white font-display font-bold">{{ urgentOrders.length }}</span>
             </button>
-            <button class="bg-dark-lighter border border-white/5 px-4 py-3 text-left" @click="activeTab = 'sales'">
-              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Покупка</span>
-              <span class="text-xl text-primary font-display font-bold">{{ stats.newSalesRequestsCount }}</span>
+            <button type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="activeTab = 'sales'">
+              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Новые заявки</span>
+              <span class="text-2xl text-primary font-display font-bold">{{ newSalesRequests.length }}</span>
             </button>
-            <button class="bg-dark-lighter border border-white/5 px-4 py-3 text-left" @click="activeTab = 'service'">
-              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Сервис</span>
-              <span class="text-xl text-green-300 font-display font-bold">{{ stats.newServiceRequestsCount }}</span>
+            <button type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="activeTab = 'service'">
+              <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Новый сервис</span>
+              <span class="text-2xl text-green-300 font-display font-bold">{{ newServiceRequests.length }}</span>
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="bg-dark min-h-screen pb-24">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <p v-if="errorText" class="mb-6 p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm">{{ errorText }}</p>
-        <p v-if="successText" class="mb-6 p-4 bg-green-500/10 border border-green-500/30 text-green-400 text-sm">{{ successText }}</p>
+    <main class="max-w-[1500px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <p v-if="errorText" class="mb-4 p-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm">{{ errorText }}</p>
+      <p v-if="successText" class="mb-4 p-4 bg-green-500/10 border border-green-500/30 text-green-400 text-sm">{{ successText }}</p>
+      <p v-if="loading" class="text-gray-500 py-10">Загрузка панели...</p>
 
-        <p v-if="loading" class="text-gray-500 py-8">Загрузка...</p>
+      <div v-else class="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-6">
+        <aside class="space-y-4">
+          <section class="bg-dark-lighter border border-white/5 p-4 xl:sticky xl:top-6">
+            <div class="flex items-center justify-between gap-3 mb-4">
+              <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Разделы</p>
+              <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="loadDashboard">Обновить</button>
+            </div>
 
-        <div v-else>
-          <section class="bg-dark-lighter border border-white/5 p-4 md:p-5 mb-6">
-            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-              <div>
-                <p class="text-primary text-xs font-bold uppercase tracking-[0.24em] mb-2">Раздел</p>
-                <h2 class="text-2xl md:text-3xl font-display font-bold text-white uppercase italic">{{ activeTabMeta.title }}</h2>
-                <p class="text-gray-500 text-sm mt-1">{{ activeTabMeta.description }}</p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-1 gap-2">
+              <button
+                v-for="tab in tabs"
+                :key="tab.id"
+                type="button"
+                class="flex items-center justify-between gap-3 border px-4 py-3 text-left transition-colors"
+                :class="activeTab === tab.id ? 'border-primary/60 bg-primary/10 text-primary' : 'border-white/5 bg-dark text-gray-400 hover:text-white hover:border-white/20'"
+                @click="activeTab = tab.id"
+              >
+                <span>
+                  <span class="block text-sm font-bold uppercase tracking-wider">{{ tab.label }}</span>
+                  <span class="block text-xs text-gray-600 mt-0.5">{{ tab.hint }}</span>
+                </span>
+                <span class="text-xs text-gray-500">{{ tabCount(tab.id) }}</span>
+              </button>
+            </div>
+
+            <button type="button" class="btn btn-primary w-full mt-4" @click="openCreateMotorcycleForm">
+              <span>Добавить товар</span>
+            </button>
+          </section>
+
+          <section class="bg-dark-lighter border border-white/5 p-4">
+            <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-3">Склад</p>
+            <div class="space-y-3 text-sm">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Всего товаров</span>
+                <span class="text-white font-bold">{{ motorcycles.length }}</span>
               </div>
-
-              <div class="grid grid-cols-2 md:grid-cols-4 xl:flex xl:flex-wrap gap-2">
-                <button
-                  v-for="tab in tabs"
-                  :key="tab.id"
-                  type="button"
-                  class="px-3 py-2 border text-xs font-bold uppercase tracking-wider transition-all text-left"
-                  :class="activeTab === tab.id ? 'border-primary/60 bg-primary/10 text-primary' : 'border-white/5 bg-dark text-gray-500 hover:text-white hover:border-white/15'"
-                  @click="activeTab = tab.id"
-                >
-                  {{ tab.label }}
-                  <span class="text-[10px] text-gray-600 ml-1">{{ tabCount(tab.id) }}</span>
-                </button>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">В наличии</span>
+                <span class="text-green-300 font-bold">{{ inventorySummary.availableCount }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Нет в наличии</span>
+                <span class="text-red-300 font-bold">{{ unavailableMotorcycles.length }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Сумма продаж</span>
+                <span class="text-primary font-bold">{{ formatCurrency(stats.totalRevenue) }}</span>
               </div>
             </div>
           </section>
+        </aside>
 
-          <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-8">
-            <button class="admin-stat-card text-left" @click="activeTab = 'orders'">
-              <span class="stat-line bg-blue-500" />
-              <span class="stat-label">Заказы</span>
-              <span class="stat-value">{{ stats.ordersCount }}</span>
-              <span class="stat-note">{{ formatCurrency(stats.totalRevenue) }}</span>
-            </button>
-            <button class="admin-stat-card text-left" @click="activeTab = 'sales'">
-              <span class="stat-line bg-primary" />
-              <span class="stat-label">Покупка</span>
-              <span class="stat-value">{{ stats.salesRequestsCount }}</span>
-              <span class="stat-note">{{ stats.newSalesRequestsCount }} новых</span>
-            </button>
-            <button class="admin-stat-card text-left" @click="activeTab = 'service'">
-              <span class="stat-line bg-green-500" />
-              <span class="stat-label">Сервис</span>
-              <span class="stat-value">{{ stats.serviceRequestsCount }}</span>
-              <span class="stat-note">{{ stats.newServiceRequestsCount }} новых</span>
-            </button>
-            <button class="admin-stat-card text-left" @click="activeTab = 'users'">
-              <span class="stat-line bg-purple-500" />
-              <span class="stat-label">Клиенты</span>
-              <span class="stat-value">{{ stats.usersCount }}</span>
-              <span class="stat-note">пользователей</span>
-            </button>
-            <button class="admin-stat-card text-left" @click="activeTab = 'products'">
-              <span class="stat-line bg-white/60" />
-              <span class="stat-label">Товары</span>
-              <span class="stat-value">{{ motorcycles.length }}</span>
-              <span class="stat-note">{{ stats.unavailableCount }} нет в наличии</span>
-            </button>
-            <button class="admin-stat-card text-left" @click="activeTab = 'messages'">
-              <span class="stat-line bg-yellow-500" />
-              <span class="stat-label">Сообщения</span>
-              <span class="stat-value">{{ stats.contactMessagesCount }}</span>
-              <span class="stat-note">обратная связь</span>
-            </button>
-          </div>
+        <div class="space-y-6">
+          <section class="bg-dark-lighter border border-white/5 p-5">
+            <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-2">Текущий раздел</p>
+            <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+              <div>
+                <h2 class="text-3xl font-display font-bold text-white uppercase italic">{{ activeTabMeta.label }}</h2>
+                <p class="text-gray-500 mt-1">{{ activeTabMeta.hint }}</p>
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div class="bg-dark border border-white/5 p-3">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Заказы</p>
+                  <p class="text-white font-display font-bold text-xl">{{ stats.ordersCount }}</p>
+                </div>
+                <div class="bg-dark border border-white/5 p-3">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Заявки</p>
+                  <p class="text-primary font-display font-bold text-xl">{{ stats.salesRequestsCount }}</p>
+                </div>
+                <div class="bg-dark border border-white/5 p-3">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Сервис</p>
+                  <p class="text-green-300 font-display font-bold text-xl">{{ stats.serviceRequestsCount }}</p>
+                </div>
+                <div class="bg-dark border border-white/5 p-3">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Клиенты</p>
+                  <p class="text-white font-display font-bold text-xl">{{ stats.usersCount }}</p>
+                </div>
+              </div>
+            </div>
+          </section>
 
           <section v-show="activeTab === 'dashboard'" class="space-y-6">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div class="admin-record lg:col-span-2">
-                <div class="flex items-center justify-between gap-4 mb-5">
-                  <div>
-                    <h2 class="text-2xl md:text-3xl font-display font-bold text-white uppercase italic">Новые обращения</h2>
-                    <p class="text-gray-500 text-sm">Заявки, которые требуют реакции менеджера.</p>
-                  </div>
-                  <button type="button" class="filter-chip filter-chip-active" @click="activeTab = 'sales'">Покупка</button>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <article v-for="request in dashboardSalesRequests" :key="request.id" class="bg-dark border border-white/5 p-4">
-                    <div class="flex items-start justify-between gap-3 mb-3">
-                      <p class="text-white font-display font-bold uppercase">#{{ request.id }} · {{ salesTypeLabels[request.type] }}</p>
-                      <StatusBadge :status="request.status" kind="sales" />
-                    </div>
-                    <p class="text-gray-300 text-sm">{{ request.motorcycle ? `${request.motorcycle.brand} ${request.motorcycle.model}` : 'Подбор техники' }}</p>
-                    <p class="text-gray-500 text-xs mt-2">{{ request.name }} · {{ request.phone }}</p>
-                  </article>
-                  <div v-if="!dashboardSalesRequests.length" class="empty-panel md:col-span-2">Новых заявок на покупку нет.</div>
-                </div>
-              </div>
-
-              <div class="admin-record">
-                <div class="flex items-center justify-between gap-4 mb-5">
-                  <div>
-                    <h2 class="text-2xl font-display font-bold text-white uppercase italic">Сервис</h2>
-                    <p class="text-gray-500 text-sm">Новые записи на обслуживание.</p>
-                  </div>
-                  <button type="button" class="filter-chip filter-chip-active" @click="activeTab = 'service'">Сервис</button>
-                </div>
-
-                <div class="space-y-3">
-                  <article v-for="request in dashboardServiceRequests" :key="request.id" class="bg-dark border border-white/5 p-4">
-                    <div class="flex items-start justify-between gap-3 mb-2">
-                      <p class="text-white font-display font-bold uppercase">#{{ request.id }}</p>
-                      <StatusBadge :status="request.status" kind="service" />
-                    </div>
-                    <p class="text-gray-300 text-sm">{{ request.motorcycle_model }}</p>
-                    <p class="text-gray-500 text-xs mt-1">{{ request.service_type }} · {{ request.phone }}</p>
-                  </article>
-                  <div v-if="!dashboardServiceRequests.length" class="empty-panel">Новых сервисных заявок нет.</div>
-                </div>
-              </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <button type="button" class="admin-record text-left" @click="activeTab = 'orders'">
+                <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Заказы требуют действий</p>
+                <p class="text-4xl text-white font-display font-bold">{{ urgentOrders.length }}</p>
+                <p class="text-gray-500 text-sm mt-2">{{ readyOrders.length }} готовы к выдаче</p>
+              </button>
+              <button type="button" class="admin-record text-left" @click="activeTab = 'sales'">
+                <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Новые заявки на покупку</p>
+                <p class="text-4xl text-primary font-display font-bold">{{ newSalesRequests.length }}</p>
+                <p class="text-gray-500 text-sm mt-2">нужно связаться с клиентом</p>
+              </button>
+              <button type="button" class="admin-record text-left" @click="activeTab = 'service'">
+                <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Новые записи на сервис</p>
+                <p class="text-4xl text-green-300 font-display font-bold">{{ newServiceRequests.length }}</p>
+                <p class="text-gray-500 text-sm mt-2">нужно подтвердить дату</p>
+              </button>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div class="admin-record">
-                <div class="flex items-center justify-between gap-4 mb-5">
-                  <h2 class="text-2xl font-display font-bold text-white uppercase italic">Последние заказы</h2>
-                  <button type="button" class="text-xs font-bold uppercase tracking-wider text-primary hover:text-white transition-colors" @click="activeTab = 'orders'">Все заказы</button>
+            <div class="grid grid-cols-1 2xl:grid-cols-2 gap-6">
+              <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                  <h3 class="text-xl font-display font-bold text-white uppercase">Очередь заказов</h3>
+                  <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="activeTab = 'orders'">Открыть</button>
                 </div>
-                <div class="space-y-3">
-                  <article v-for="order in latestOrders" :key="order.id" class="flex items-center justify-between gap-4 bg-dark border border-white/5 p-4">
+                <div class="divide-y divide-white/5">
+                  <article v-for="order in urgentOrders.slice(0, 5)" :key="order.id" class="p-4 flex items-center justify-between gap-4">
                     <div>
-                      <p class="text-white font-display font-bold uppercase">Заказ #{{ order.id }}</p>
-                      <p class="text-gray-500 text-xs">{{ order.name || 'Гость' }} · {{ new Date(order.created_at).toLocaleDateString('ru-RU') }}</p>
+                      <p class="text-white font-bold">#{{ order.id }} · {{ order.name || 'Гость' }}</p>
+                      <p class="text-gray-500 text-sm">{{ order.phone || 'без телефона' }} · {{ formatCurrency(order.total) }}</p>
                     </div>
-                    <div class="text-right">
-                      <StatusBadge :status="order.status" kind="order" />
-                      <p class="text-primary font-display font-bold mt-2">{{ formatCurrency(order.total) }}</p>
-                    </div>
+                    <StatusBadge :status="order.status" kind="order" />
                   </article>
-                  <div v-if="!latestOrders.length" class="empty-panel">Заказов пока нет.</div>
+                  <div v-if="!urgentOrders.length" class="empty-panel">Активных заказов нет.</div>
                 </div>
-              </div>
+              </section>
 
-              <div class="admin-record">
-                <div class="flex items-center justify-between gap-4 mb-5">
-                  <h2 class="text-2xl font-display font-bold text-white uppercase italic">Склад</h2>
-                  <button type="button" class="text-xs font-bold uppercase tracking-wider text-primary hover:text-white transition-colors" @click="activeTab = 'products'">Каталог</button>
+              <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+                <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                  <h3 class="text-xl font-display font-bold text-white uppercase">Новые обращения</h3>
+                  <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="activeTab = 'sales'">К заявкам</button>
                 </div>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Позиций</p>
-                    <p class="text-2xl font-display font-bold text-white">{{ motorcycles.length }}</p>
-                  </div>
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">В наличии</p>
-                    <p class="text-2xl font-display font-bold text-green-300">{{ inventorySummary.availableCount }}</p>
-                  </div>
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Нет</p>
-                    <p class="text-2xl font-display font-bold text-red-300">{{ stats.unavailableCount }}</p>
-                  </div>
-                </div>
-                <div class="space-y-3">
-                  <article v-for="moto in unavailableMotorcycles" :key="moto.id" class="flex items-center justify-between gap-4 bg-dark border border-white/5 p-4">
-                    <p class="text-white text-sm font-bold">{{ moto.brand }} {{ moto.model }}</p>
-                    <StatusBadge status="unavailable" kind="product" />
+                <div class="divide-y divide-white/5">
+                  <article v-for="request in newSalesRequests.slice(0, 5)" :key="request.id" class="p-4 flex items-start justify-between gap-4">
+                    <div>
+                      <p class="text-white font-bold">#{{ request.id }} · {{ salesTypeLabels[request.type] }}</p>
+                      <p class="text-gray-500 text-sm">{{ request.name }} · {{ request.phone }}</p>
+                    </div>
+                    <StatusBadge :status="request.status" kind="sales" />
                   </article>
-                  <div v-if="!unavailableMotorcycles.length" class="empty-panel">Все товары доступны для продажи.</div>
+                  <div v-if="!newSalesRequests.length" class="empty-panel">Новых заявок на покупку нет.</div>
                 </div>
-              </div>
+              </section>
             </div>
           </section>
 
-          <section v-show="activeTab === 'products'">
-            <div class="bg-dark-lighter border border-white/5 p-5 md:p-6 mb-8">
-              <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-                <div>
-                  <h2 class="text-2xl md:text-3xl font-display font-bold text-white uppercase italic mb-2">Склад и каталог</h2>
-                  <p class="text-gray-500 max-w-2xl">
-                    Товары сгруппированы, чтобы менеджер быстрее видел структуру склада: техника, ATV, запчасти, бренды и наличие.
-                  </p>
-                </div>
-
-                <button type="button" class="btn btn-primary shrink-0" @click="openCreateMotorcycleForm">
-                  <span>Добавить товар</span>
+          <section v-show="activeTab === 'orders'" class="space-y-3">
+            <article v-for="order in orders" :key="order.id" class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="p-4 md:p-5 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4">
+                <button type="button" class="text-left" @click="toggleOrderDetails(order.id)">
+                  <div class="flex flex-wrap items-center gap-3 mb-2">
+                    <p class="text-white font-display font-bold uppercase">Заказ #{{ order.id }}</p>
+                    <StatusBadge :status="order.status" kind="order" />
+                  </div>
+                  <p class="text-gray-500 text-sm">{{ order.name || 'Гость' }} · {{ order.phone || 'без телефона' }} · {{ formatDate(order.created_at) }}</p>
                 </button>
+
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3 lg:justify-end">
+                  <span class="text-primary font-display font-bold text-xl">{{ formatCurrency(order.total) }}</span>
+                  <select class="field-dark sm:w-56" :value="order.status" @change="updateOrderStatus(order.id, ($event.target as HTMLSelectElement).value as Order['status'])">
+                    <option v-for="option in orderStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                  <button type="button" class="filter-chip" @click="toggleOrderDetails(order.id)">{{ isOrderExpanded(order.id) ? 'Скрыть' : 'Детали' }}</button>
+                </div>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-6">
+              <div v-if="isOrderExpanded(order.id)" class="border-t border-white/5 p-4 md:p-5">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase mb-1">Оплата</p>
+                    <p class="text-white font-bold">{{ paymentMethodLabel(order.payment_method) }}</p>
+                    <p class="text-gray-500 text-sm">{{ paymentStatusLabel(order.payment_status) }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase mb-1">Выдача</p>
+                    <p class="text-white font-bold">{{ order.pickup_point?.name || 'Не выбран' }}</p>
+                    <p class="text-gray-500 text-sm">{{ order.pickup_point?.address || 'Адрес не указан' }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase mb-1">Готовность</p>
+                    <p class="text-white font-bold">{{ formatDate(order.pickup_ready_at) }}</p>
+                    <p class="text-gray-500 text-sm">Клиент увидит уведомление</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-4">
+                    <p class="text-xs text-gray-600 font-bold uppercase mb-1">Бронь</p>
+                    <p class="text-white font-bold">{{ reservationLabel(order) }}</p>
+                    <p class="text-gray-500 text-sm">{{ order.reservations?.length ?? 0 }} позиций</p>
+                  </div>
+                </div>
+
+                <div class="space-y-2">
+                  <div v-for="item in order.items" :key="item.id" class="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0">
+                    <span class="text-gray-300">{{ item.name }} <span class="text-gray-600">× {{ item.quantity }}</span></span>
+                    <span class="text-white font-display font-bold">{{ formatCurrency(item.price * item.quantity) }}</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+            <div v-if="!orders.length" class="empty-panel">Заказов пока нет.</div>
+          </section>
+
+          <section v-show="activeTab === 'sales'" class="space-y-4">
+            <div class="flex gap-2 overflow-x-auto">
+              <button v-for="option in salesStatusOptions" :key="option.value" class="filter-chip" :class="salesStatusFilter === option.value ? 'filter-chip-active' : ''" @click="salesStatusFilter = option.value">
+                {{ option.label }}
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <article v-for="request in filteredSalesRequests" :key="request.id" class="admin-record">
+                <div class="flex items-start justify-between gap-4 mb-4">
+                  <div>
+                    <p class="text-white font-display font-bold uppercase">Заявка #{{ request.id }} · {{ salesTypeLabels[request.type] }}</p>
+                    <p class="text-gray-600 text-sm">{{ formatDate(request.created_at) }}</p>
+                  </div>
+                  <StatusBadge :status="request.status" kind="sales" />
+                </div>
+                <p class="text-gray-300 font-medium">{{ request.motorcycle ? `${request.motorcycle.brand} ${request.motorcycle.model}` : 'Подбор техники' }}</p>
+                <p class="text-gray-500 text-sm mt-1">{{ request.name }} · {{ request.phone }} · {{ request.email || 'email не указан' }}</p>
+                <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
+                <div class="flex gap-2 mt-5">
+                  <select class="field-dark flex-1" :value="request.status" @change="updateSalesStatus(request.id, ($event.target as HTMLSelectElement).value as SalesRequest['status'])">
+                    <option value="new">Новая</option>
+                    <option value="in_progress">В работе</option>
+                    <option value="approved">Согласована</option>
+                    <option value="completed">Завершена</option>
+                    <option value="cancelled">Отменена</option>
+                  </select>
+                  <button type="button" class="icon-button hover:text-red-400 hover:border-red-500/50" title="Удалить заявку" @click="deleteSalesRequest(request.id)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                </div>
+              </article>
+            </div>
+            <div v-if="!filteredSalesRequests.length" class="empty-panel">Нет заявок с выбранным статусом.</div>
+          </section>
+
+          <section v-show="activeTab === 'service'" class="space-y-4">
+            <div class="flex gap-2 overflow-x-auto">
+              <button v-for="option in serviceStatusOptions" :key="option.value" class="filter-chip" :class="serviceStatusFilter === option.value ? 'filter-chip-active' : ''" @click="serviceStatusFilter = option.value">
+                {{ option.label }}
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <article v-for="request in filteredServiceRequests" :key="request.id" class="admin-record">
+                <div class="flex items-start justify-between gap-4 mb-4">
+                  <div>
+                    <p class="text-white font-display font-bold uppercase">Сервис #{{ request.id }} · {{ request.service_type }}</p>
+                    <p class="text-gray-600 text-sm">{{ formatDate(request.created_at) }}</p>
+                  </div>
+                  <StatusBadge :status="request.status" kind="service" />
+                </div>
+                <p class="text-gray-300 font-medium">{{ request.motorcycle_model }}</p>
+                <p class="text-gray-500 text-sm mt-1">{{ request.name }} · {{ request.phone }} · {{ request.email || 'email не указан' }}</p>
+                <p class="text-gray-500 text-sm mt-2">Желаемая дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
+                <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
+                <div class="flex gap-2 mt-5">
+                  <select class="field-dark flex-1" :value="request.status" @change="updateServiceStatus(request.id, ($event.target as HTMLSelectElement).value as ServiceRequest['status'])">
+                    <option value="new">Новая</option>
+                    <option value="confirmed">Подтверждена</option>
+                    <option value="in_service">В сервисе</option>
+                    <option value="done">Готово</option>
+                    <option value="cancelled">Отменена</option>
+                  </select>
+                  <button type="button" class="icon-button hover:text-red-400 hover:border-red-500/50" title="Удалить сервисную заявку" @click="deleteServiceRequest(request.id)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                </div>
+              </article>
+            </div>
+            <div v-if="!filteredServiceRequests.length" class="empty-panel">Нет сервисных заявок с выбранным статусом.</div>
+          </section>
+
+          <section v-show="activeTab === 'products'" class="space-y-5">
+            <div class="bg-dark-lighter border border-white/5 p-5">
+              <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
+                <div>
+                  <h3 class="text-2xl font-display font-bold text-white uppercase italic">Склад и каталог</h3>
+                  <p class="text-gray-500 text-sm">Поиск, группировка и редактирование товаров.</p>
+                </div>
+                <button type="button" class="btn btn-primary" @click="openCreateMotorcycleForm"><span>Добавить товар</span></button>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div class="bg-dark border border-white/5 p-4">
-                  <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Стоимость склада</p>
+                  <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Стоимость склада</p>
                   <p class="text-xl font-display font-bold text-white">{{ formatCurrency(inventorySummary.totalValue) }}</p>
                 </div>
                 <div class="bg-dark border border-white/5 p-4">
-                  <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">В наличии</p>
+                  <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">В наличии</p>
                   <p class="text-xl font-display font-bold text-green-300">{{ inventorySummary.availableCount }} / {{ motorcycles.length }}</p>
                 </div>
                 <div class="bg-dark border border-white/5 p-4">
-                  <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Средняя цена</p>
+                  <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Средняя цена</p>
                   <p class="text-xl font-display font-bold text-primary">{{ formatCurrency(inventorySummary.averagePrice) }}</p>
                 </div>
               </div>
             </div>
 
-            <form v-if="showProductForm" class="bg-dark-lighter border border-white/5 mb-8" @submit.prevent="saveMotorcycle">
-              <div class="px-6 py-4 border-b border-white/5 flex items-center justify-between gap-3">
-                <h2 class="text-lg font-bold font-display text-white uppercase">{{ editingId ? 'Редактирование товара' : 'Новый товар' }}</h2>
-                <StatusBadge :status="form.is_available ? 'available' : 'unavailable'" kind="product" />
+            <form v-if="showProductForm" class="bg-dark-lighter border border-white/5" @submit.prevent="saveMotorcycle">
+              <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between gap-3">
+                <h3 class="text-lg font-display font-bold text-white uppercase">{{ editingId ? 'Редактирование товара' : 'Новый товар' }}</h3>
+                <button type="button" class="filter-chip" @click="resetForm">Закрыть</button>
               </div>
 
-              <div class="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div class="p-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 <input v-model="form.brand" class="field-dark" placeholder="Бренд" required />
                 <input v-model="form.model" class="field-dark" placeholder="Модель" required />
                 <input v-model="form.type" class="field-dark" placeholder="Тип" required />
@@ -752,21 +812,17 @@ onMounted(loadDashboard);
                   <input v-model="form.is_available" type="checkbox" class="w-5 h-5 border-2 border-white/20 bg-dark text-primary" />
                   В наличии
                 </label>
-                <textarea v-model="form.description" class="field-dark md:col-span-2 lg:col-span-2" rows="3" placeholder="Описание" required />
+                <textarea v-model="form.description" class="field-dark md:col-span-2 xl:col-span-2" rows="3" placeholder="Описание" required />
               </div>
 
-              <div class="px-6 pb-6 flex flex-wrap items-center gap-3">
-                <button type="submit" class="btn btn-primary" :disabled="saving"><span>{{ saving ? 'Сохранение...' : (editingId ? 'Сохранить изменения' : 'Добавить товар') }}</span></button>
-                <button type="button" class="px-6 py-3 border border-white/10 text-gray-400 text-sm font-bold font-display uppercase tracking-wider hover:border-white/30 hover:text-white transition-all" @click="resetForm">Сброс</button>
+              <div class="px-5 pb-5 flex flex-wrap items-center gap-3">
+                <button type="submit" class="btn btn-primary" :disabled="saving"><span>{{ saving ? 'Сохранение...' : 'Сохранить товар' }}</span></button>
               </div>
             </form>
 
-            <div class="bg-dark-lighter border border-white/5 p-5 md:p-6 mb-6">
-              <div class="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between mb-5">
-                <div class="relative flex-1">
-                  <svg class="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0" /></svg>
-                  <input v-model="searchQuery" type="text" placeholder="Поиск по названию, бренду или типу..." class="field-dark pl-12" />
-                </div>
+            <div class="bg-dark-lighter border border-white/5 p-5">
+              <div class="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-4 mb-4">
+                <input v-model="searchQuery" type="text" placeholder="Поиск по названию, бренду или типу..." class="field-dark" />
                 <div class="flex gap-2 overflow-x-auto">
                   <button class="filter-chip" :class="filterStatus === 'all' ? 'filter-chip-active' : ''" @click="filterStatus = 'all'">Все</button>
                   <button class="filter-chip" :class="filterStatus === 'available' ? 'filter-chip-active' : ''" @click="filterStatus = 'available'">В наличии</button>
@@ -774,51 +830,32 @@ onMounted(loadDashboard);
                 </div>
               </div>
 
-              <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
-                <div>
-                  <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-2">Группировать товары</p>
-                  <div class="flex gap-2 overflow-x-auto">
-                    <button
-                      v-for="mode in productGroupModes"
-                      :key="mode.value"
-                      type="button"
-                      class="filter-chip"
-                      :class="productGroupMode === mode.value ? 'filter-chip-active' : ''"
-                      @click="setProductGroupMode(mode.value)"
-                    >
-                      {{ mode.label }}
-                    </button>
-                  </div>
+              <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div class="flex gap-2 overflow-x-auto">
+                  <button
+                    v-for="mode in productGroupModes"
+                    :key="mode.value"
+                    type="button"
+                    class="filter-chip"
+                    :class="productGroupMode === mode.value ? 'filter-chip-active' : ''"
+                    @click="setProductGroupMode(mode.value)"
+                  >
+                    {{ mode.label }}
+                  </button>
                 </div>
-                <button type="button" class="text-xs font-bold uppercase tracking-wider text-gray-500 hover:text-primary transition-colors" @click="selectedProductGroup = 'all'">
-                  Показать все группы
-                </button>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <button
-                  type="button"
-                  class="product-group-card"
-                  :class="selectedProductGroup === 'all' ? 'product-group-card-active' : ''"
-                  @click="selectedProductGroup = 'all'"
-                >
-                  <span class="text-xs text-gray-600 font-bold uppercase tracking-wider">Все группы</span>
-                  <span class="text-2xl font-display font-bold text-white">{{ filteredMotorcycles.length }}</span>
-                  <span class="text-xs text-gray-500">{{ formatCurrency(filteredMotorcycles.reduce((sum, moto) => sum + moto.price, 0)) }}</span>
-                </button>
-
-                <button
-                  v-for="group in productGroupCards"
-                  :key="group.key"
-                  type="button"
-                  class="product-group-card"
-                  :class="selectedProductGroup === group.key ? 'product-group-card-active' : ''"
-                  @click="selectedProductGroup = group.key"
-                >
-                  <span class="text-xs text-gray-600 font-bold uppercase tracking-wider">{{ group.label }}</span>
-                  <span class="text-2xl font-display font-bold text-white">{{ group.count }}</span>
-                  <span class="text-xs text-gray-500">{{ formatCurrency(group.value) }}</span>
-                </button>
+                <div class="flex gap-2 overflow-x-auto">
+                  <button type="button" class="filter-chip" :class="selectedProductGroup === 'all' ? 'filter-chip-active' : ''" @click="selectedProductGroup = 'all'">Все группы</button>
+                  <button
+                    v-for="group in productGroupCards"
+                    :key="group.key"
+                    type="button"
+                    class="filter-chip"
+                    :class="selectedProductGroup === group.key ? 'filter-chip-active' : ''"
+                    @click="selectedProductGroup = group.key"
+                  >
+                    {{ group.label }} · {{ group.count }}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -874,135 +911,7 @@ onMounted(loadDashboard);
                 </table>
               </div>
             </div>
-            <div v-if="!visibleMotorcycles.length" class="empty-panel mt-4">Товаров по выбранным условиям не найдено.</div>
-          </section>
-
-          <section v-show="activeTab === 'orders'" class="space-y-4">
-            <article v-for="order in orders" :key="order.id" class="admin-record">
-              <button type="button" class="w-full text-left flex flex-col md:flex-row md:items-center md:justify-between gap-4" @click="toggleOrderDetails(order.id)">
-                <div>
-                  <div class="flex items-center gap-3 mb-2">
-                    <p class="text-white font-display font-bold uppercase">Заказ #{{ order.id }}</p>
-                    <StatusBadge :status="order.status" kind="order" />
-                  </div>
-                  <p class="text-gray-500 text-sm">{{ order.name || 'Гость' }} · {{ order.phone || 'Без телефона' }} · {{ new Date(order.created_at).toLocaleString('ru-RU') }}</p>
-                </div>
-                <div class="flex items-center gap-4">
-                  <span class="text-xl font-bold text-primary font-display">{{ formatCurrency(order.total) }}</span>
-                  <span class="text-xs text-gray-600 uppercase tracking-wider">{{ isOrderExpanded(order.id) ? 'Свернуть' : 'Детали' }}</span>
-                </div>
-              </button>
-
-              <div class="mt-4 flex flex-col md:flex-row md:items-center gap-3">
-                <select class="field-dark md:max-w-64" :value="order.status" @change="updateOrderStatus(order.id, ($event.target as HTMLSelectElement).value as Order['status'])">
-                    <option v-for="option in orderStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
-                <p class="text-xs text-gray-600">При подтверждении клиент получит уведомление в личный кабинет.</p>
-              </div>
-
-              <div v-if="isOrderExpanded(order.id)" class="mt-5 border-t border-white/5 pt-4 space-y-2">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Оплата</p>
-                    <p class="text-white text-sm font-bold">{{ paymentMethodLabel(order.payment_method) }}</p>
-                    <p class="text-gray-500 text-xs mt-1">{{ paymentStatusLabel(order.payment_status) }}</p>
-                  </div>
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Выдача</p>
-                    <p class="text-white text-sm font-bold">{{ order.pickup_point?.name || 'Не выбран' }}</p>
-                    <p class="text-gray-500 text-xs mt-1">{{ order.pickup_point?.address || 'Адрес не указан' }}</p>
-                  </div>
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Готовность</p>
-                    <p class="text-white text-sm font-bold">{{ order.pickup_ready_at ? new Date(order.pickup_ready_at).toLocaleString('ru-RU') : 'Не назначена' }}</p>
-                    <p class="text-gray-500 text-xs mt-1">Статус меняется менеджером</p>
-                  </div>
-                  <div class="bg-dark border border-white/5 p-4">
-                    <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Бронь</p>
-                    <p class="text-white text-sm font-bold">{{ reservationLabel(order) }}</p>
-                    <p class="text-gray-500 text-xs mt-1">{{ order.reservations?.length ?? 0 }} позиций</p>
-                  </div>
-                </div>
-                <div v-for="item in order.items" :key="item.id" class="flex items-center justify-between text-sm">
-                  <span class="text-gray-300">{{ item.name }} <span class="text-gray-600">× {{ item.quantity }}</span></span>
-                  <span class="text-white font-bold font-display">{{ formatCurrency(item.price * item.quantity) }}</span>
-                </div>
-              </div>
-            </article>
-            <div v-if="!orders.length" class="empty-panel">Заказов пока нет.</div>
-          </section>
-
-          <section v-show="activeTab === 'sales'">
-            <div class="flex flex-wrap gap-2 mb-6">
-              <button v-for="option in salesStatusOptions" :key="option.value" class="filter-chip" :class="salesStatusFilter === option.value ? 'filter-chip-active' : ''" @click="salesStatusFilter = option.value">
-                {{ option.label }}
-              </button>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <article v-for="request in filteredSalesRequests" :key="request.id" class="admin-record">
-                <div class="flex items-start justify-between gap-4 mb-4">
-                  <div>
-                    <p class="text-white font-display font-bold uppercase">Заявка #{{ request.id }} · {{ salesTypeLabels[request.type] }}</p>
-                    <p class="text-gray-600 text-sm">{{ new Date(request.created_at).toLocaleString('ru-RU') }}</p>
-                  </div>
-                  <StatusBadge :status="request.status" kind="sales" />
-                </div>
-                <p class="text-gray-300 font-medium">{{ request.motorcycle ? `${request.motorcycle.brand} ${request.motorcycle.model}` : 'Подбор техники' }}</p>
-                <p class="text-gray-500 text-sm mt-1">{{ request.name }} · {{ request.phone }} · {{ request.email || 'email не указан' }}</p>
-                <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
-                <div class="flex gap-2 mt-5">
-                  <select class="field-dark flex-1" :value="request.status" @change="updateSalesStatus(request.id, ($event.target as HTMLSelectElement).value as SalesRequest['status'])">
-                    <option value="new">Новая</option>
-                    <option value="in_progress">В работе</option>
-                    <option value="approved">Согласована</option>
-                    <option value="completed">Завершена</option>
-                    <option value="cancelled">Отменена</option>
-                  </select>
-                  <button type="button" class="icon-button hover:text-red-400 hover:border-red-500/50" title="Удалить заявку" @click="deleteSalesRequest(request.id)">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                  </button>
-                </div>
-              </article>
-            </div>
-            <div v-if="!filteredSalesRequests.length" class="empty-panel">Нет заявок с выбранным статусом.</div>
-          </section>
-
-          <section v-show="activeTab === 'service'">
-            <div class="flex flex-wrap gap-2 mb-6">
-              <button v-for="option in serviceStatusOptions" :key="option.value" class="filter-chip" :class="serviceStatusFilter === option.value ? 'filter-chip-active' : ''" @click="serviceStatusFilter = option.value">
-                {{ option.label }}
-              </button>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <article v-for="request in filteredServiceRequests" :key="request.id" class="admin-record">
-                <div class="flex items-start justify-between gap-4 mb-4">
-                  <div>
-                    <p class="text-white font-display font-bold uppercase">Сервис #{{ request.id }} · {{ request.service_type }}</p>
-                    <p class="text-gray-600 text-sm">{{ new Date(request.created_at).toLocaleString('ru-RU') }}</p>
-                  </div>
-                  <StatusBadge :status="request.status" kind="service" />
-                </div>
-                <p class="text-gray-300 font-medium">{{ request.motorcycle_model }}</p>
-                <p class="text-gray-500 text-sm mt-1">{{ request.name }} · {{ request.phone }} · {{ request.email || 'email не указан' }}</p>
-                <p class="text-gray-500 text-sm mt-2">Желаемая дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
-                <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
-                <div class="flex gap-2 mt-5">
-                  <select class="field-dark flex-1" :value="request.status" @change="updateServiceStatus(request.id, ($event.target as HTMLSelectElement).value as ServiceRequest['status'])">
-                    <option value="new">Новая</option>
-                    <option value="confirmed">Подтверждена</option>
-                    <option value="in_service">В сервисе</option>
-                    <option value="done">Готово</option>
-                    <option value="cancelled">Отменена</option>
-                  </select>
-                  <button type="button" class="icon-button hover:text-red-400 hover:border-red-500/50" title="Удалить сервисную заявку" @click="deleteServiceRequest(request.id)">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                  </button>
-                </div>
-              </article>
-            </div>
-            <div v-if="!filteredServiceRequests.length" class="empty-panel">Нет сервисных заявок с выбранным статусом.</div>
+            <div v-if="!visibleMotorcycles.length" class="empty-panel">Товаров по выбранным условиям не найдено.</div>
           </section>
 
           <section v-show="activeTab === 'users'" class="bg-dark-lighter border border-white/5 overflow-hidden">
@@ -1039,22 +948,18 @@ onMounted(loadDashboard);
             </div>
           </section>
 
-          <section v-show="activeTab === 'messages'" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <section v-show="activeTab === 'messages'" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <article v-for="message in messages" :key="message.id" class="admin-record">
-              <div class="flex items-start justify-between gap-4 mb-4">
-                <div>
-                  <p class="text-white font-display font-bold uppercase">Сообщение #{{ message.id }}</p>
-                  <p class="text-gray-600 text-sm">{{ new Date(message.created_at).toLocaleString('ru-RU') }}</p>
-                </div>
-              </div>
-              <p class="text-gray-300 font-medium">{{ message.name }}</p>
+              <p class="text-white font-display font-bold uppercase">Сообщение #{{ message.id }}</p>
+              <p class="text-gray-600 text-sm mt-1">{{ formatDate(message.created_at) }}</p>
+              <p class="text-gray-300 font-medium mt-4">{{ message.name }}</p>
               <p class="text-gray-500 text-sm mt-1">{{ message.phone || 'телефон не указан' }} · {{ message.email || 'email не указан' }}</p>
               <p class="text-gray-400 text-sm mt-4 leading-relaxed">{{ message.message }}</p>
             </article>
-            <div v-if="!messages.length" class="empty-panel lg:col-span-2">Сообщений пока нет.</div>
+            <div v-if="!messages.length" class="empty-panel xl:col-span-2">Сообщений пока нет.</div>
           </section>
         </div>
       </div>
-    </div>
+    </main>
   </div>
 </template>
