@@ -24,6 +24,7 @@ use App\Services\AdminDashboardService;
 use App\Services\CartService;
 use App\Services\OrderService;
 use App\Services\StatusHistoryService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -293,12 +294,34 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminSalesRequestsIndex(): JsonResponse
+    public function adminSalesRequestsIndex(Request $request): JsonResponse
     {
-        $salesRequests = SalesRequest::with(['user', 'motorcycle'])->latest()->get();
+        $query = SalesRequest::with(['user', 'motorcycle'])->latest();
+
+        if ($request->filled('status') && in_array($request->input('status'), SalesRequest::STATUSES, true)) {
+            $query->where('status', $request->input('status'));
+        }
+
+        if ($request->filled('type') && in_array($request->input('type'), SalesRequest::TYPES, true)) {
+            $query->where('type', $request->input('type'));
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('comment', 'like', "%{$search}%")
+                    ->orWhereHas('motorcycle', function ($motorcycleQuery) use ($search) {
+                        $motorcycleQuery->where('brand', 'like', "%{$search}%")
+                            ->orWhere('model', 'like', "%{$search}%");
+                    });
+            });
+        }
 
         return response()->json([
-            'sales_requests' => $salesRequests,
+            'sales_requests' => $this->adminListPayload($request, $query),
         ]);
     }
 
@@ -329,12 +352,40 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminServiceRequestsIndex(): JsonResponse
+    public function adminServiceRequestsIndex(Request $request): JsonResponse
     {
-        $serviceRequests = ServiceRequest::with('user')->latest()->get();
+        $query = ServiceRequest::with('user')->latest();
+
+        if ($request->filled('status') && in_array($request->input('status'), ServiceRequest::STATUSES, true)) {
+            $query->where('status', $request->input('status'));
+        }
+
+        if ($request->filled('service_type')) {
+            $query->where('service_type', $request->string('service_type')->toString());
+        }
+
+        if ($request->filled('date_from')) {
+            $query->whereDate('preferred_date', '>=', $request->input('date_from'));
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('preferred_date', '<=', $request->input('date_to'));
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('motorcycle_model', 'like', "%{$search}%")
+                    ->orWhere('service_type', 'like', "%{$search}%")
+                    ->orWhere('comment', 'like', "%{$search}%");
+            });
+        }
 
         return response()->json([
-            'service_requests' => $serviceRequests,
+            'service_requests' => $this->adminListPayload($request, $query),
         ]);
     }
 
@@ -593,6 +644,17 @@ class SpaApiController extends Controller
                 'max' => (int) (clone $baseQuery)->max('power'),
             ],
         ];
+    }
+
+    private function adminListPayload(Request $request, Builder $query): mixed
+    {
+        $perPage = (int) $request->input('per_page', 0);
+
+        if ($perPage > 0) {
+            return $query->paginate(max(1, min(50, $perPage)))->withQueryString();
+        }
+
+        return $query->get();
     }
 
     private function newsItems(): array
