@@ -20,6 +20,7 @@ use App\Models\Order;
 use App\Models\SalesRequest;
 use App\Models\ServiceRequest;
 use App\Models\User;
+use App\Services\AdminDashboardService;
 use App\Services\CartService;
 use App\Services\OrderService;
 use App\Services\StatusHistoryService;
@@ -32,6 +33,7 @@ use Illuminate\Validation\ValidationException;
 class SpaApiController extends Controller
 {
     public function __construct(
+        private AdminDashboardService $adminDashboardService,
         private CartService $cartService,
         private OrderService $orderService,
         private StatusHistoryService $statusHistoryService
@@ -455,32 +457,7 @@ class SpaApiController extends Controller
 
     public function adminDashboard(): JsonResponse
     {
-        $motorcycles = Motorcycle::latest()->get();
-        $orders = Order::with(['items', 'user'])->latest()->get();
-        $salesRequests = SalesRequest::with(['user', 'motorcycle'])->latest()->get();
-        $serviceRequests = ServiceRequest::with('user')->latest()->get();
-        $messages = ContactMessage::latest()->get();
-        $users = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest()->get();
-
-        return response()->json([
-            'motorcycles' => $motorcycles,
-            'orders' => $orders,
-            'sales_requests' => $salesRequests,
-            'service_requests' => $serviceRequests,
-            'messages' => $messages,
-            'users' => $users,
-            'stats' => [
-                'usersCount' => $users->count(),
-                'ordersCount' => $orders->count(),
-                'salesRequestsCount' => $salesRequests->count(),
-                'serviceRequestsCount' => $serviceRequests->count(),
-                'contactMessagesCount' => $messages->count(),
-                'newSalesRequestsCount' => $salesRequests->where('status', 'new')->count(),
-                'newServiceRequestsCount' => $serviceRequests->where('status', 'new')->count(),
-                'totalRevenue' => $orders->where('status', '!=', 'cancelled')->sum('total'),
-                'unavailableCount' => $motorcycles->where('is_available', false)->count(),
-            ],
-        ]);
+        return response()->json($this->adminDashboardService->payload());
     }
 
     public function adminStoreMotorcycle(StoreMotorcycleRequest $request): JsonResponse
