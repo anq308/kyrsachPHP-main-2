@@ -53,6 +53,16 @@ class User extends Authenticatable
         return $this->hasMany(ServiceRequest::class);
     }
 
+    public function reservations()
+    {
+        return $this->hasMany(Reservation::class);
+    }
+
+    public function clientNotifications()
+    {
+        return $this->hasMany(ClientNotification::class);
+    }
+
     public function hasFavorite($motorcycleId): bool
     {
         return $this->favorites()->where('motorcycle_id', $motorcycleId)->exists();

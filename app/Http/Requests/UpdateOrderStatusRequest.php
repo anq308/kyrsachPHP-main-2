@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Order;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -15,7 +16,8 @@ class UpdateOrderStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['required', Rule::in(['new', 'processing', 'completed', 'cancelled'])],
+            'status' => ['required', Rule::in(Order::STATUSES)],
+            'pickup_ready_at' => 'nullable|date',
         ];
     }
 }

@@ -5,12 +5,17 @@ namespace App\Services;
 use App\Models\Motorcycle;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Reservation;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class OrderService
 {
-    public function __construct(private CartService $cartService) {}
+    public function __construct(
+        private CartService $cartService,
+        private ClientNotificationService $notificationService
+    ) {}
 
     public function createFromCart(array $customerData, ?int $userId): Order
     {
@@ -35,6 +40,9 @@ class OrderService
                 'comment' => $customerData['comment'] ?? null,
                 'total' => $total,
                 'status' => 'new',
+                'payment_method' => $customerData['payment_method'],
+                'payment_status' => $customerData['payment_method'] === 'online_mock' ? 'paid' : 'pending',
+                'pickup_point_id' => $customerData['pickup_point_id'],
             ]);
 
             foreach ($items as $item) {
@@ -45,11 +53,27 @@ class OrderService
                     'price' => $item['price'],
                     'quantity' => $item['quantity'],
                 ]);
+
+                Reservation::create([
+                    'user_id' => $userId,
+                    'order_id' => $order->id,
+                    'motorcycle_id' => $item['motorcycle']->id,
+                    'status' => 'active',
+                    'expires_at' => now()->addDays(2),
+                ]);
+
+                $item['motorcycle']->update(['is_available' => false]);
             }
 
             $this->cartService->clear();
+            $this->notificationService->create(
+                $userId ? User::find($userId) : null,
+                'Заказ оформлен',
+                "Заказ #{$order->id} создан. Техника предварительно забронирована, менеджер проверит детали заказа.",
+                'order'
+            );
 
-            return $order->load('items');
+            return $order->load(['items', 'pickupPoint', 'reservations.motorcycle']);
         });
     }
 
@@ -65,7 +89,7 @@ class OrderService
             }
 
             $motorcycle = Motorcycle::find((int) $id);
-            if (! $motorcycle || ! $motorcycle->is_available) {
+            if (! $motorcycle || ! $motorcycle->is_available || $this->hasActiveReservation($motorcycle)) {
                 throw ValidationException::withMessages([
                     'cart' => 'Один из товаров больше недоступен для заказа.',
                 ]);
@@ -84,5 +108,15 @@ class OrderService
         }
 
         return $items;
+    }
+
+    private function hasActiveReservation(Motorcycle $motorcycle): bool
+    {
+        return $motorcycle->reservations()
+            ->where('status', 'active')
+            ->where(function ($query) {
+                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->exists();
     }
 }

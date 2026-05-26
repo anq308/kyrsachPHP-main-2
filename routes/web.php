@@ -8,6 +8,7 @@ Route::prefix('api')->group(function () {
     Route::get('/csrf-token', [SpaApiController::class, 'csrfToken']);
     Route::get('/home', [SpaApiController::class, 'home']);
     Route::get('/catalog', [SpaApiController::class, 'catalog']);
+    Route::get('/pickup-points', [SpaApiController::class, 'pickupPoints']);
     Route::get('/motorcycles/{id}', [SpaApiController::class, 'motorcycle']);
 
     Route::get('/cart', [SpaApiController::class, 'cartIndex']);
@@ -34,6 +35,7 @@ Route::prefix('api')->group(function () {
         Route::get('/favorites', [SpaApiController::class, 'favoritesIndex']);
         Route::post('/favorites/{id}', [SpaApiController::class, 'toggleFavorite']);
         Route::get('/profile', [SpaApiController::class, 'profile']);
+        Route::patch('/profile/notifications/read', [SpaApiController::class, 'markNotificationsRead']);
         Route::get('/profile/applications', [SpaApiController::class, 'salesRequestsIndex']);
         Route::get('/profile/service-requests', [SpaApiController::class, 'serviceRequestsIndex']);
         Route::get('/applications', [SpaApiController::class, 'salesRequestsIndex']);

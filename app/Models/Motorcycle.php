@@ -37,4 +37,9 @@ class Motorcycle extends Model
     {
         return $this->hasMany(SalesRequest::class);
     }
+
+    public function reservations()
+    {
+        return $this->hasMany(Reservation::class);
+    }
 }

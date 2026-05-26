@@ -17,11 +17,13 @@ use App\Models\ContactMessage;
 use App\Models\Favorite;
 use App\Models\Motorcycle;
 use App\Models\Order;
+use App\Models\PickupPoint;
 use App\Models\SalesRequest;
 use App\Models\ServiceRequest;
 use App\Models\User;
 use App\Services\AdminDashboardService;
 use App\Services\CartService;
+use App\Services\OrderLifecycleService;
 use App\Services\OrderService;
 use App\Services\StatusHistoryService;
 use Illuminate\Database\Eloquent\Builder;
@@ -37,6 +39,7 @@ class SpaApiController extends Controller
         private AdminDashboardService $adminDashboardService,
         private CartService $cartService,
         private OrderService $orderService,
+        private OrderLifecycleService $orderLifecycleService,
         private StatusHistoryService $statusHistoryService
     ) {}
 
@@ -171,6 +174,15 @@ class SpaApiController extends Controller
             'motorcycle' => $motorcycle,
             'is_in_compare' => in_array($motorcycle->id, $compare, true),
             'is_favorite' => $user ? $user->hasFavorite($motorcycle->id) : false,
+        ]);
+    }
+
+    public function pickupPoints(): JsonResponse
+    {
+        return response()->json([
+            'pickup_points' => PickupPoint::where('is_active', true)
+                ->orderBy('name')
+                ->get(),
         ]);
     }
 
@@ -493,16 +505,34 @@ class SpaApiController extends Controller
     public function profile(Request $request): JsonResponse
     {
         $user = $request->user();
-        $orders = $user->orders()->with('items')->latest()->get();
+        $orders = $user->orders()
+            ->with(['items', 'pickupPoint', 'reservations.motorcycle'])
+            ->latest()
+            ->get();
         $salesRequests = $user->salesRequests()->with('motorcycle')->latest()->get();
         $serviceRequests = $user->serviceRequests()->latest()->get();
+        $notifications = $user->clientNotifications()->latest()->take(20)->get();
 
         return response()->json([
             'user' => $this->userPayload($user),
             'orders' => $orders,
             'sales_requests' => $salesRequests,
             'service_requests' => $serviceRequests,
+            'notifications' => $notifications,
+            'unread_notifications_count' => $user->clientNotifications()->where('is_read', false)->count(),
             'favorites_count' => $user->favorites()->count(),
+        ]);
+    }
+
+    public function markNotificationsRead(Request $request): JsonResponse
+    {
+        $request->user()
+            ->clientNotifications()
+            ->where('is_read', false)
+            ->update(['is_read' => true]);
+
+        return response()->json([
+            'message' => 'Уведомления отмечены как прочитанные.',
         ]);
     }
 
@@ -551,9 +581,12 @@ class SpaApiController extends Controller
     public function adminUpdateOrderStatus(UpdateOrderStatusRequest $request, string $id): JsonResponse
     {
         $order = Order::findOrFail($id);
-        $oldStatus = $order->status;
-        $order->update(['status' => $request->input('status')]);
-        $this->statusHistoryService->record($order, $oldStatus, $order->status, $request->user());
+        $order = $this->orderLifecycleService->updateStatus(
+            $order,
+            $request->input('status'),
+            $request->user(),
+            $request->input('pickup_ready_at')
+        );
 
         return response()->json([
             'message' => 'Статус заказа #'.$order->id.' обновлён.',

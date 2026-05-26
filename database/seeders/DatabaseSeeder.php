@@ -23,6 +23,9 @@ class DatabaseSeeder extends Seeder
             'is_admin' => true,
         ]);
 
-        $this->call(MotorcycleSeeder::class);
+        $this->call([
+            MotorcycleSeeder::class,
+            PickupPointSeeder::class,
+        ]);
     }
 }

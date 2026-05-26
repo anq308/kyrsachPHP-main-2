@@ -15,7 +15,7 @@ class AdminDashboardService
     public function payload(): array
     {
         $motorcycles = Motorcycle::latest()->get();
-        $orders = Order::with(['items', 'user'])->latest()->get();
+        $orders = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle'])->latest()->get();
         $salesRequests = SalesRequest::with(['user', 'motorcycle'])->latest()->get();
         $serviceRequests = ServiceRequest::with('user')->latest()->get();
         $messages = ContactMessage::latest()->get();
