@@ -17,19 +17,24 @@ use App\Models\ContactMessage;
 use App\Models\Favorite;
 use App\Models\Motorcycle;
 use App\Models\Order;
-use App\Models\OrderItem;
 use App\Models\SalesRequest;
 use App\Models\ServiceRequest;
 use App\Models\User;
+use App\Services\CartService;
+use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class SpaApiController extends Controller
 {
+    public function __construct(
+        private CartService $cartService,
+        private OrderService $orderService
+    ) {}
+
     public function bootstrap(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -208,92 +213,35 @@ class SpaApiController extends Controller
 
     public function cartIndex(): JsonResponse
     {
-        $cart = session()->get('cart', []);
-
-        return response()->json($this->normalizeCart($cart));
+        return response()->json($this->cartService->normalize());
     }
 
     public function cartAdd(Request $request, string $id): JsonResponse
     {
         $motorcycle = Motorcycle::findOrFail($id);
-        $cart = session()->get('cart', []);
-
-        if (isset($cart[$id])) {
-            $cart[$id]['quantity']++;
-        } else {
-            $cart[$id] = [
-                'name' => $motorcycle->brand.' '.$motorcycle->model,
-                'quantity' => 1,
-                'price' => $motorcycle->price,
-                'image' => $motorcycle->image_url,
-            ];
-        }
-
-        session()->put('cart', $cart);
+        $cart = $this->cartService->add($motorcycle);
 
         return response()->json([
             'message' => 'Товар добавлен в корзину!',
             'buy_now' => $request->boolean('buy_now'),
-            'cart' => $this->normalizeCart($cart),
+            'cart' => $cart,
         ]);
     }
 
     public function cartRemove(string $id): JsonResponse
     {
-        $cart = session()->get('cart', []);
-
-        if (isset($cart[$id])) {
-            unset($cart[$id]);
-            session()->put('cart', $cart);
-        }
+        $cart = $this->cartService->remove($id);
 
         return response()->json([
             'message' => 'Товар удален из корзины!',
-            'cart' => $this->normalizeCart($cart),
+            'cart' => $cart,
         ]);
     }
 
     public function checkout(CheckoutRequest $request): JsonResponse
     {
-        $cart = session()->get('cart', []);
-
-        if (empty($cart)) {
-            return response()->json(['message' => 'Корзина пуста!'], 422);
-        }
-
         $validated = $request->validated();
-
-        $total = 0;
-        foreach ($cart as $item) {
-            $total += ((int) $item['price']) * ((int) $item['quantity']);
-        }
-
-        $order = DB::transaction(function () use ($validated, $total, $cart) {
-            $order = Order::create([
-                'user_id' => Auth::id(),
-                'name' => $validated['name'],
-                'phone' => $validated['phone'],
-                'email' => $validated['email'] ?? null,
-                'address' => $validated['address'] ?? null,
-                'comment' => $validated['comment'] ?? null,
-                'total' => $total,
-                'status' => 'new',
-            ]);
-
-            foreach ($cart as $id => $item) {
-                OrderItem::create([
-                    'order_id' => $order->id,
-                    'motorcycle_id' => is_numeric($id) ? (int) $id : null,
-                    'name' => $item['name'],
-                    'price' => $item['price'],
-                    'quantity' => $item['quantity'],
-                ]);
-            }
-
-            return $order;
-        });
-
-        session()->forget('cart');
+        $order = $this->orderService->createFromCart($validated, Auth::id());
 
         return response()->json([
             'message' => 'Заказ #'.$order->id.' успешно оформлен! Мы свяжемся с вами в ближайшее время.',
@@ -637,34 +585,6 @@ class SpaApiController extends Controller
             'email' => $user->email,
             'is_admin' => (bool) $user->is_admin,
             'created_at' => optional($user->created_at)?->toISOString(),
-        ];
-    }
-
-    private function normalizeCart(array $cart): array
-    {
-        $items = [];
-        $total = 0;
-
-        foreach ($cart as $id => $item) {
-            $quantity = (int) $item['quantity'];
-            $price = (int) $item['price'];
-            $lineTotal = $quantity * $price;
-            $total += $lineTotal;
-
-            $items[] = [
-                'id' => is_numeric($id) ? (int) $id : $id,
-                'name' => $item['name'],
-                'quantity' => $quantity,
-                'price' => $price,
-                'image' => $item['image'],
-                'line_total' => $lineTotal,
-            ];
-        }
-
-        return [
-            'items' => $items,
-            'total' => $total,
-            'count' => count($items),
         ];
     }
 
