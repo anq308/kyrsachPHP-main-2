@@ -403,6 +403,38 @@ class BackendWorkflowTest extends TestCase
             ->assertJsonPath('users.0.role', User::ROLE_MANAGER);
     }
 
+    public function test_admin_dashboard_contains_analytics(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        ServiceRequest::create([
+            'name' => 'Сервис аналитика',
+            'phone' => '+79990000301',
+            'motorcycle_model' => 'AVANTIS Enduro 250',
+            'service_type' => 'Диагностика',
+            'status' => 'new',
+        ]);
+        SalesRequest::create([
+            'name' => 'Заявка аналитика',
+            'phone' => '+79990000302',
+            'type' => 'purchase',
+            'status' => 'completed',
+        ]);
+
+        $this->actingAs($admin)
+            ->getJson('/api/admin/dashboard')
+            ->assertOk()
+            ->assertJsonStructure([
+                'analytics' => [
+                    'monthlyRevenue',
+                    'ordersByStatus',
+                    'popularMotorcycles',
+                    'serviceTypes',
+                    'salesConversion',
+                ],
+            ])
+            ->assertJsonPath('analytics.salesConversion', 100);
+    }
+
     public function test_admin_can_filter_service_requests_by_search(): void
     {
         $admin = User::factory()->create(['is_admin' => true]);

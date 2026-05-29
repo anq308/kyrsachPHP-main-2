@@ -23,6 +23,14 @@ interface AdminUser extends User {
   service_requests?: ServiceRequest[];
 }
 
+interface DashboardAnalytics {
+  monthlyRevenue: number;
+  ordersByStatus: Record<string, number>;
+  popularMotorcycles: Array<{ id: number; name: string; views_count: number; price: number }>;
+  serviceTypes: Array<{ type: string; count: number }>;
+  salesConversion: number;
+}
+
 type AdminTab = 'dashboard' | 'orders' | 'sales' | 'service' | 'products' | 'users' | 'messages';
 type ProductGroupMode = 'type' | 'brand' | 'availability';
 
@@ -58,6 +66,13 @@ const stats = ref<DashboardStats>({
   newServiceRequestsCount: 0,
   totalRevenue: 0,
   unavailableCount: 0,
+});
+const analytics = ref<DashboardAnalytics>({
+  monthlyRevenue: 0,
+  ordersByStatus: {},
+  popularMotorcycles: [],
+  serviceTypes: [],
+  salesConversion: 0,
 });
 
 const editingId = ref<number | null>(null);
@@ -399,6 +414,7 @@ async function loadDashboard() {
     messages.value = data.messages ?? [];
     statusHistories.value = data.status_histories ?? [];
     stats.value = data.stats;
+    analytics.value = data.analytics ?? analytics.value;
   } catch {
     errorText.value = 'Не удалось загрузить данные админ-панели.';
   } finally {
@@ -653,6 +669,53 @@ onMounted(loadDashboard);
                 <p class="text-gray-500 text-sm mt-2">нужно подтвердить дату</p>
               </button>
             </div>
+
+            <section class="bg-dark-lighter border border-white/5 p-5">
+              <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
+                <div>
+                  <h3 class="text-xl font-display font-bold text-white uppercase">Аналитика</h3>
+                  <p class="text-gray-500 text-sm">Продажи, конверсия заявок и интерес к моделям.</p>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-3 w-full lg:w-auto">
+                  <div class="bg-dark border border-white/5 p-3">
+                    <p class="text-gray-600 text-xs uppercase font-bold">Продажи за месяц</p>
+                    <p class="text-primary font-display font-bold text-xl">{{ formatCurrency(analytics.monthlyRevenue) }}</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-3">
+                    <p class="text-gray-600 text-xs uppercase font-bold">Конверсия заявок</p>
+                    <p class="text-white font-display font-bold text-xl">{{ analytics.salesConversion }}%</p>
+                  </div>
+                  <div class="bg-dark border border-white/5 p-3">
+                    <p class="text-gray-600 text-xs uppercase font-bold">Готовы к выдаче</p>
+                    <p class="text-green-300 font-display font-bold text-xl">{{ analytics.ordersByStatus.ready_for_pickup ?? 0 }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div class="bg-dark border border-white/5 p-4">
+                  <p class="text-gray-600 text-xs uppercase font-bold mb-3">Популярные модели</p>
+                  <div class="space-y-3">
+                    <div v-for="moto in analytics.popularMotorcycles" :key="moto.id" class="flex items-center justify-between gap-4">
+                      <span class="text-gray-300 text-sm">{{ moto.name }}</span>
+                      <span class="text-gray-500 text-xs">{{ moto.views_count }} просмотров</span>
+                    </div>
+                    <p v-if="!analytics.popularMotorcycles.length" class="text-gray-600 text-sm">Данных пока нет.</p>
+                  </div>
+                </div>
+
+                <div class="bg-dark border border-white/5 p-4">
+                  <p class="text-gray-600 text-xs uppercase font-bold mb-3">Услуги сервиса</p>
+                  <div class="space-y-3">
+                    <div v-for="item in analytics.serviceTypes.slice(0, 5)" :key="item.type" class="flex items-center justify-between gap-4">
+                      <span class="text-gray-300 text-sm">{{ item.type }}</span>
+                      <span class="text-gray-500 text-xs">{{ item.count }} заявок</span>
+                    </div>
+                    <p v-if="!analytics.serviceTypes.length" class="text-gray-600 text-sm">Сервисных заявок пока нет.</p>
+                  </div>
+                </div>
+              </div>
+            </section>
 
             <div class="grid grid-cols-1 2xl:grid-cols-2 gap-6">
               <section class="bg-dark-lighter border border-white/5 overflow-hidden">
