@@ -58,6 +58,7 @@ Route::prefix('api')->group(function () {
         Route::get('/service-requests', [SpaApiController::class, 'adminServiceRequestsIndex']);
         Route::patch('/service-requests/{id}/status', [SpaApiController::class, 'adminUpdateServiceRequestStatus']);
         Route::delete('/service-requests/{id}', [SpaApiController::class, 'adminDeleteServiceRequest']);
+        Route::patch('/users/{id}/role', [SpaApiController::class, 'adminUpdateUserRole']);
     });
 });
 

@@ -26,6 +26,8 @@ const labels: Record<string, string> = {
   available: 'В наличии',
   unavailable: 'Нет в наличии',
   admin: 'Админ',
+  manager: 'Менеджер',
+  client: 'Клиент',
   user: 'Клиент',
 };
 
@@ -44,6 +46,8 @@ const classes = computed(() => {
     available: 'border-green-500/30 bg-green-500/10 text-green-300',
     unavailable: 'border-red-500/30 bg-red-500/10 text-red-300',
     admin: 'border-primary/40 bg-primary/10 text-primary',
+    manager: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
+    client: 'border-white/10 bg-white/5 text-gray-400',
     user: 'border-white/10 bg-white/5 text-gray-400',
   };
 

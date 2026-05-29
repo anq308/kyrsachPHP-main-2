@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
+import { sessionState } from '../session';
 import type { ContactMessage, Motorcycle, Order, SalesRequest, ServiceRequest, User } from '../types';
 
 interface DashboardStats {
@@ -129,12 +130,19 @@ const productGroupModes: Array<{ value: ProductGroupMode; label: string }> = [
   { value: 'availability', label: 'Наличие' },
 ];
 
+const roleOptions: Array<{ value: User['role']; label: string }> = [
+  { value: 'client', label: 'Клиент' },
+  { value: 'manager', label: 'Менеджер' },
+  { value: 'admin', label: 'Администратор' },
+];
+
 const activeTabMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
 const urgentOrders = computed(() => orders.value.filter((order) => ['new', 'processing', 'approved'].includes(order.status)));
 const readyOrders = computed(() => orders.value.filter((order) => order.status === 'ready_for_pickup'));
 const newSalesRequests = computed(() => salesRequests.value.filter((request) => request.status === 'new'));
 const newServiceRequests = computed(() => serviceRequests.value.filter((request) => request.status === 'new'));
 const unavailableMotorcycles = computed(() => motorcycles.value.filter((moto) => !moto.is_available));
+const canEditRoles = computed(() => sessionState.user?.role === 'admin');
 
 const filteredMotorcycles = computed(() => {
   const query = searchQuery.value.toLowerCase().trim();
@@ -457,6 +465,16 @@ async function deleteServiceRequest(requestId: number) {
     await loadDashboard();
   } catch {
     errorText.value = 'Не удалось удалить сервисную заявку.';
+  }
+}
+
+async function updateUserRole(userId: number, role: User['role']) {
+  try {
+    const { data } = await api.patch(`/admin/users/${userId}/role`, { role });
+    successText.value = data.message;
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось обновить роль пользователя.';
   }
 }
 
@@ -931,7 +949,7 @@ onMounted(loadDashboard);
                     <td><span class="text-gray-600 text-sm font-display font-bold">#{{ client.id }}</span></td>
                     <td>
                       <div class="flex items-center gap-3">
-                        <div class="w-9 h-9 flex items-center justify-center text-sm font-display font-bold" :class="client.is_admin ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-white/5 text-gray-400 border border-white/10'">
+                        <div class="w-9 h-9 flex items-center justify-center text-sm font-display font-bold" :class="client.can_manage ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-white/5 text-gray-400 border border-white/10'">
                           {{ client.name.trim().charAt(0).toUpperCase() }}
                         </div>
                         <span class="text-white font-medium text-sm">{{ client.name }}</span>
@@ -941,7 +959,18 @@ onMounted(loadDashboard);
                     <td class="hidden md:table-cell">
                       <span class="text-gray-500 text-sm">{{ client.orders?.length ?? 0 }} заказов · {{ client.sales_requests?.length ?? 0 }} заявок · {{ client.service_requests?.length ?? 0 }} сервис</span>
                     </td>
-                    <td class="hidden md:table-cell"><StatusBadge :status="client.is_admin ? 'admin' : 'user'" kind="role" /></td>
+                    <td class="hidden md:table-cell">
+                      <select
+                        v-if="canEditRoles"
+                        class="field-dark min-w-44"
+                        :value="client.role"
+                        :disabled="client.id === sessionState.user?.id"
+                        @change="updateUserRole(client.id, ($event.target as HTMLSelectElement).value as User['role'])"
+                      >
+                        <option v-for="option in roleOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                      </select>
+                      <StatusBadge v-else :status="client.role" kind="role" />
+                    </td>
                   </tr>
                 </tbody>
               </table>

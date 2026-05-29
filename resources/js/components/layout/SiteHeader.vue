@@ -12,7 +12,7 @@ const profileMenuOpen = ref(false);
 const mobileMenuOpen = ref(false);
 
 const isAuth = computed(() => Boolean(sessionState.user));
-const isAdmin = computed(() => Boolean(sessionState.user?.is_admin));
+const isStaff = computed(() => Boolean(sessionState.user?.can_manage));
 const firstLetter = computed(() => sessionState.user?.name?.trim().charAt(0).toUpperCase() ?? 'U');
 
 function closeMenuOnOutsideClick(event: MouseEvent) {
@@ -137,8 +137,8 @@ async function logout() {
               <RouterLink to="/favorites" class="block px-4 py-2 text-sm text-gray-300 hover:bg-primary hover:text-white transition-colors" @click="profileMenuOpen = false">
                 Избранное
               </RouterLink>
-              <RouterLink v-if="isAdmin" to="/admin" class="block px-4 py-2 text-sm text-primary hover:bg-primary hover:text-white transition-colors font-bold" @click="profileMenuOpen = false">
-                Админ-панель
+              <RouterLink v-if="isStaff" to="/admin" class="block px-4 py-2 text-sm text-primary hover:bg-primary hover:text-white transition-colors font-bold" @click="profileMenuOpen = false">
+                Панель менеджера
               </RouterLink>
               <div class="border-t border-white/10 my-1" />
               <button class="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-red-500/80 hover:text-white transition-colors" @click="logout">
@@ -167,7 +167,7 @@ async function logout() {
         <RouterLink to="/service" class="mobile-nav-link" @click="mobileMenuOpen = false">Сервис</RouterLink>
         <RouterLink to="/contacts" class="mobile-nav-link" @click="mobileMenuOpen = false">Контакты</RouterLink>
         <RouterLink v-if="isAuth" to="/profile" class="mobile-nav-link" @click="mobileMenuOpen = false">Личный кабинет</RouterLink>
-        <RouterLink v-if="isAdmin" to="/admin" class="mobile-nav-link text-primary" @click="mobileMenuOpen = false">Админ-панель</RouterLink>
+        <RouterLink v-if="isStaff" to="/admin" class="mobile-nav-link text-primary" @click="mobileMenuOpen = false">Панель менеджера</RouterLink>
         <div v-if="!isAuth" class="grid grid-cols-2 gap-3 pt-2">
           <RouterLink to="/login" class="mobile-action-link" @click="mobileMenuOpen = false">Вход</RouterLink>
           <RouterLink to="/register" class="mobile-action-link bg-primary text-dark border-primary" @click="mobileMenuOpen = false">Регистрация</RouterLink>

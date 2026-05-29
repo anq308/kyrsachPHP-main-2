@@ -12,11 +12,24 @@ class User extends Authenticatable
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable;
 
+    public const ROLE_CLIENT = 'client';
+
+    public const ROLE_MANAGER = 'manager';
+
+    public const ROLE_ADMIN = 'admin';
+
+    public const ROLES = [
+        self::ROLE_CLIENT,
+        self::ROLE_MANAGER,
+        self::ROLE_ADMIN,
+    ];
+
     protected $fillable = [
         'name',
         'email',
         'password',
         'is_admin',
+        'role',
     ];
 
     protected $hidden = [
@@ -31,6 +44,40 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_admin' => 'boolean',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (User $user) {
+            if ($user->isDirty('role')) {
+                $user->is_admin = $user->role === self::ROLE_ADMIN;
+
+                return;
+            }
+
+            if ($user->is_admin && empty($user->role)) {
+                $user->role = self::ROLE_ADMIN;
+            }
+
+            if (empty($user->role)) {
+                $user->role = self::ROLE_CLIENT;
+            }
+        });
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->role === self::ROLE_ADMIN || (bool) $this->is_admin;
+    }
+
+    public function isManager(): bool
+    {
+        return $this->role === self::ROLE_MANAGER;
+    }
+
+    public function canManagePanel(): bool
+    {
+        return $this->isAdmin() || $this->isManager();
     }
 
     public function orders()

@@ -32,8 +32,9 @@ const router = createRouter({
     { path: '/register', name: 'register', component: RegisterPage, meta: { requiresGuest: true } },
     { path: '/profile', name: 'profile', component: ProfilePage, meta: { requiresAuth: true } },
     { path: '/favorites', name: 'favorites', component: FavoritesPage, meta: { requiresAuth: true } },
-    { path: '/admin', name: 'admin', component: AdminPage, meta: { requiresAdmin: true } },
+    { path: '/admin', name: 'admin', component: AdminPage, meta: { requiresStaff: true } },
     { path: '/admin/dashboard', redirect: '/admin' },
+    { path: '/manager', redirect: '/admin' },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundPage },
   ],
 });
@@ -47,12 +48,12 @@ router.beforeEach(async (to) => {
     }
   }
 
-  if (to.meta.requiresAdmin) {
+  if (to.meta.requiresStaff) {
     if (!sessionState.user) {
       return { name: 'login' };
     }
 
-    if (!sessionState.user.is_admin) {
+    if (!sessionState.user.can_manage) {
       return { name: 'home' };
     }
   }

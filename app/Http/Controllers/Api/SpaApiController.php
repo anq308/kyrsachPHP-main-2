@@ -13,6 +13,7 @@ use App\Http\Requests\StoreServiceRequestRequest;
 use App\Http\Requests\UpdateOrderStatusRequest;
 use App\Http\Requests\UpdateSalesRequestStatusRequest;
 use App\Http\Requests\UpdateServiceRequestStatusRequest;
+use App\Http\Requests\UpdateUserRoleRequest;
 use App\Models\ContactMessage;
 use App\Models\Favorite;
 use App\Models\Motorcycle;
@@ -642,6 +643,26 @@ class SpaApiController extends Controller
         ]);
     }
 
+    public function adminUpdateUserRole(UpdateUserRoleRequest $request, string $id): JsonResponse
+    {
+        $user = User::findOrFail($id);
+
+        if ($user->id === $request->user()->id && $request->input('role') !== User::ROLE_ADMIN) {
+            return response()->json([
+                'message' => 'Нельзя снять роль администратора у своей учетной записи.',
+            ], 422);
+        }
+
+        $user->update([
+            'role' => $request->input('role'),
+        ]);
+
+        return response()->json([
+            'message' => 'Роль пользователя обновлена.',
+            'user' => $this->userPayload($user->fresh()),
+        ]);
+    }
+
     private function userPayload(?User $user): ?array
     {
         if (! $user) {
@@ -653,6 +674,9 @@ class SpaApiController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'is_admin' => (bool) $user->is_admin,
+            'role' => $user->role,
+            'is_manager' => $user->isManager(),
+            'can_manage' => $user->canManagePanel(),
             'created_at' => optional($user->created_at)?->toISOString(),
         ];
     }

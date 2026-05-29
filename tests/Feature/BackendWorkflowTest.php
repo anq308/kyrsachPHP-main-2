@@ -65,7 +65,48 @@ class BackendWorkflowTest extends TestCase
         $this->actingAs($user)
             ->getJson('/api/admin/dashboard')
             ->assertForbidden()
-            ->assertJsonPath('message', 'Доступ запрещён.');
+            ->assertJsonPath('message', 'Доступ разрешён только менеджеру или администратору.');
+    }
+
+    public function test_manager_can_access_staff_dashboard(): void
+    {
+        $manager = User::factory()->create(['role' => User::ROLE_MANAGER]);
+
+        $this->actingAs($manager)
+            ->getJson('/api/admin/dashboard')
+            ->assertOk();
+    }
+
+    public function test_admin_can_assign_user_roles(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $user = User::factory()->create(['role' => User::ROLE_CLIENT]);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/admin/users/{$user->id}/role", [
+                'role' => User::ROLE_MANAGER,
+            ])
+            ->assertOk()
+            ->assertJsonPath('user.role', User::ROLE_MANAGER)
+            ->assertJsonPath('user.can_manage', true);
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'role' => User::ROLE_MANAGER,
+            'is_admin' => false,
+        ]);
+    }
+
+    public function test_manager_cannot_assign_user_roles(): void
+    {
+        $manager = User::factory()->create(['role' => User::ROLE_MANAGER]);
+        $user = User::factory()->create(['role' => User::ROLE_CLIENT]);
+
+        $this->actingAs($manager)
+            ->patchJson("/api/admin/users/{$user->id}/role", [
+                'role' => User::ROLE_ADMIN,
+            ])
+            ->assertForbidden();
     }
 
     public function test_admin_status_update_creates_history_record(): void

@@ -3,6 +3,9 @@ export interface User {
   name: string;
   email: string;
   is_admin: boolean;
+  role: 'client' | 'manager' | 'admin';
+  is_manager: boolean;
+  can_manage: boolean;
   created_at?: string;
 }
 

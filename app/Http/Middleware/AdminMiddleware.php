@@ -10,9 +10,9 @@ class AdminMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (! $request->user() || ! $request->user()->is_admin) {
+        if (! $request->user() || ! $request->user()->canManagePanel()) {
             return response()->json([
-                'message' => 'Доступ запрещён.',
+                'message' => 'Доступ разрешён только менеджеру или администратору.',
             ], 403);
         }
 

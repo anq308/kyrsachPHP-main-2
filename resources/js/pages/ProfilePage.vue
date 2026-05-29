@@ -25,6 +25,7 @@ const latestOrder = computed(() => orders.value[0] ?? null);
 const activeOrders = computed(() => orders.value.filter((order) => !['completed', 'cancelled'].includes(order.status)));
 const activeSalesRequests = computed(() => salesRequests.value.filter((request) => !['completed', 'cancelled'].includes(request.status)));
 const activeServiceRequests = computed(() => serviceRequests.value.filter((request) => !['done', 'cancelled'].includes(request.status)));
+const isStaffUser = computed(() => Boolean(user.value?.can_manage));
 
 const tabs = computed<Array<{ id: ProfileTab; label: string; count: number }>>(() => [
   { id: 'overview', label: 'Обзор', count: unreadNotificationsCount.value },
@@ -181,8 +182,11 @@ onMounted(loadProfile);
             <div class="space-y-3 text-sm">
               <div class="flex items-center justify-between gap-3">
                 <span class="text-gray-500">Роль</span>
-                <StatusBadge :status="user.is_admin ? 'admin' : 'user'" kind="role" />
+                <StatusBadge :status="user.role" kind="role" />
               </div>
+              <RouterLink v-if="isStaffUser" to="/admin" class="filter-chip block text-center">
+                Рабочая панель
+              </RouterLink>
               <div class="flex items-center justify-between gap-3">
                 <span class="text-gray-500">Избранное</span>
                 <span class="text-white font-bold">{{ favoritesCount }}</span>
