@@ -303,7 +303,8 @@ onMounted(loadProfile);
                   <div class="bg-dark border border-white/5 p-4">
                     <p class="text-xs text-gray-600 font-bold uppercase mb-1">Оплата</p>
                     <p class="text-white font-bold">{{ paymentMethodLabel(order.payment_method) }}</p>
-                    <p class="text-gray-500 text-sm">{{ paymentStatusLabel(order.payment_status) }}</p>
+                    <p class="text-gray-500 text-sm">{{ paymentStatusLabel(order.payments?.[0]?.status ?? order.payment_status) }}</p>
+                    <p v-if="order.payments?.[0]?.transaction_id" class="text-gray-600 text-xs mt-1">{{ order.payments[0].transaction_id }}</p>
                   </div>
                   <div class="bg-dark border border-white/5 p-4">
                     <p class="text-xs text-gray-600 font-bold uppercase mb-1">Пункт выдачи</p>

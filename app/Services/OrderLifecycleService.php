@@ -27,7 +27,7 @@ class OrderLifecycleService
         $this->syncReservations($order);
         $this->notifyCustomer($order, $oldStatus);
 
-        return $order->fresh(['items', 'pickupPoint', 'reservations.motorcycle']);
+        return $order->fresh(['items', 'pickupPoint', 'reservations.motorcycle', 'payments']);
     }
 
     private function syncReservations(Order $order): void

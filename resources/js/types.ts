@@ -80,6 +80,18 @@ export interface Reservation {
   motorcycle?: Motorcycle | null;
 }
 
+export interface Payment {
+  id: number;
+  order_id: number;
+  user_id: number | null;
+  amount: number;
+  method: 'cash_pickup' | 'card_pickup' | 'online_mock' | 'credit_request';
+  status: 'pending' | 'paid' | 'failed' | 'refunded';
+  transaction_id: string | null;
+  paid_at: string | null;
+  created_at: string;
+}
+
 export interface ClientNotification {
   id: number;
   user_id: number;
@@ -106,6 +118,7 @@ export interface Order {
   pickup_ready_at?: string | null;
   pickup_point?: PickupPoint | null;
   reservations?: Reservation[];
+  payments?: Payment[];
   items: OrderItem[];
   created_at: string;
 }

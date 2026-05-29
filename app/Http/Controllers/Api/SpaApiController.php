@@ -507,7 +507,7 @@ class SpaApiController extends Controller
     {
         $user = $request->user();
         $orders = $user->orders()
-            ->with(['items', 'pickupPoint', 'reservations.motorcycle'])
+            ->with(['items', 'pickupPoint', 'reservations.motorcycle', 'payments'])
             ->latest()
             ->get();
         $salesRequests = $user->salesRequests()->with('motorcycle')->latest()->get();

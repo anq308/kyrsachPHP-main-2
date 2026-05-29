@@ -110,6 +110,11 @@ class User extends Authenticatable
         return $this->hasMany(ClientNotification::class);
     }
 
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
+    }
+
     public function hasFavorite($motorcycleId): bool
     {
         return $this->favorites()->where('motorcycle_id', $motorcycleId)->exists();

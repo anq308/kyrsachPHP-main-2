@@ -14,7 +14,8 @@ class OrderService
 {
     public function __construct(
         private CartService $cartService,
-        private ClientNotificationService $notificationService
+        private ClientNotificationService $notificationService,
+        private PaymentService $paymentService
     ) {}
 
     public function createFromCart(array $customerData, ?int $userId): Order
@@ -65,6 +66,8 @@ class OrderService
                 $item['motorcycle']->update(['is_available' => false]);
             }
 
+            $this->paymentService->createForOrder($order, $customerData['payment_method']);
+
             $this->cartService->clear();
             $this->notificationService->create(
                 $userId ? User::find($userId) : null,
@@ -73,7 +76,7 @@ class OrderService
                 'order'
             );
 
-            return $order->load(['items', 'pickupPoint', 'reservations.motorcycle']);
+            return $order->load(['items', 'pickupPoint', 'reservations.motorcycle', 'payments']);
         });
     }
 

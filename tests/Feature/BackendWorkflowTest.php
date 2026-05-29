@@ -208,6 +208,13 @@ class BackendWorkflowTest extends TestCase
             'type' => 'order',
             'is_read' => false,
         ]);
+        $this->assertDatabaseHas('payments', [
+            'user_id' => $user->id,
+            'order_id' => $order->id,
+            'amount' => 180000,
+            'method' => 'online_mock',
+            'status' => 'paid',
+        ]);
     }
 
     public function test_admin_order_status_update_notifies_customer_and_releases_reservation_on_cancel(): void
