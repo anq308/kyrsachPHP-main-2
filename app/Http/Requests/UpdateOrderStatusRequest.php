@@ -18,6 +18,7 @@ class UpdateOrderStatusRequest extends FormRequest
         return [
             'status' => ['required', Rule::in(Order::STATUSES)],
             'pickup_ready_at' => 'nullable|date',
+            'status_comment' => 'nullable|string|max:1000',
         ];
     }
 }

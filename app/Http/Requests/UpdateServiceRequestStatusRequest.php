@@ -17,6 +17,7 @@ class UpdateServiceRequestStatusRequest extends FormRequest
     {
         return [
             'status' => ['required', Rule::in(ServiceRequest::STATUSES)],
+            'status_comment' => 'nullable|string|max:1000',
         ];
     }
 }

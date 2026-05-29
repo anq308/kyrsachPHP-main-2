@@ -586,7 +586,8 @@ class SpaApiController extends Controller
             $order,
             $request->input('status'),
             $request->user(),
-            $request->input('pickup_ready_at')
+            $request->input('pickup_ready_at'),
+            $request->input('status_comment')
         );
 
         return response()->json([
@@ -600,7 +601,7 @@ class SpaApiController extends Controller
         $salesRequest = SalesRequest::findOrFail($id);
         $oldStatus = $salesRequest->status;
         $salesRequest->update(['status' => $request->input('status')]);
-        $this->statusHistoryService->record($salesRequest, $oldStatus, $salesRequest->status, $request->user());
+        $this->statusHistoryService->record($salesRequest, $oldStatus, $salesRequest->status, $request->user(), $request->input('status_comment'));
         $salesRequest->load(['user', 'motorcycle']);
 
         return response()->json([
@@ -624,7 +625,7 @@ class SpaApiController extends Controller
         $serviceRequest = ServiceRequest::findOrFail($id);
         $oldStatus = $serviceRequest->status;
         $serviceRequest->update(['status' => $request->input('status')]);
-        $this->statusHistoryService->record($serviceRequest, $oldStatus, $serviceRequest->status, $request->user());
+        $this->statusHistoryService->record($serviceRequest, $oldStatus, $serviceRequest->status, $request->user(), $request->input('status_comment'));
         $serviceRequest->load('user');
 
         return response()->json([

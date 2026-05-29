@@ -13,7 +13,7 @@ class OrderLifecycleService
         private StatusHistoryService $statusHistoryService
     ) {}
 
-    public function updateStatus(Order $order, string $status, ?User $manager = null, ?string $pickupReadyAt = null): Order
+    public function updateStatus(Order $order, string $status, ?User $manager = null, ?string $pickupReadyAt = null, ?string $comment = null): Order
     {
         $oldStatus = $order->status;
 
@@ -23,7 +23,7 @@ class OrderLifecycleService
         }
 
         $order->update($payload);
-        $this->statusHistoryService->record($order, $oldStatus, $order->status, $manager);
+        $this->statusHistoryService->record($order, $oldStatus, $order->status, $manager, $comment);
         $this->syncReservations($order);
         $this->notifyCustomer($order, $oldStatus);
 

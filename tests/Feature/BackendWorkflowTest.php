@@ -123,6 +123,7 @@ class BackendWorkflowTest extends TestCase
         $this->actingAs($admin)
             ->patchJson("/api/admin/sales-requests/{$salesRequest->id}/status", [
                 'status' => 'in_progress',
+                'status_comment' => 'Клиенту позвонили, ждём решение.',
             ])
             ->assertOk()
             ->assertJsonPath('sales_request.status', 'in_progress');
@@ -133,6 +134,7 @@ class BackendWorkflowTest extends TestCase
             'old_status' => 'new',
             'new_status' => 'in_progress',
             'user_id' => $admin->id,
+            'comment' => 'Клиенту позвонили, ждём решение.',
         ]);
     }
 
@@ -255,6 +257,7 @@ class BackendWorkflowTest extends TestCase
         $this->actingAs($admin)
             ->patchJson("/api/admin/orders/{$order->id}/status", [
                 'status' => 'cancelled',
+                'status_comment' => 'Клиент отказался от покупки.',
             ])
             ->assertOk()
             ->assertJsonPath('order.status', 'cancelled');
@@ -267,6 +270,7 @@ class BackendWorkflowTest extends TestCase
             'old_status' => 'approved',
             'new_status' => 'cancelled',
             'user_id' => $admin->id,
+            'comment' => 'Клиент отказался от покупки.',
         ]);
     }
 

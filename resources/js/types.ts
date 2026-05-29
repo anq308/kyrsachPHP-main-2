@@ -153,3 +153,15 @@ export interface ContactMessage {
   message: string;
   created_at: string;
 }
+
+export interface StatusHistory {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  old_status: string | null;
+  new_status: string;
+  user_id: number | null;
+  comment: string | null;
+  user?: User | null;
+  created_at: string;
+}

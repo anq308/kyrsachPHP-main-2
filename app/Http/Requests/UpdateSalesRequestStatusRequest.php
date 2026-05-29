@@ -17,6 +17,7 @@ class UpdateSalesRequestStatusRequest extends FormRequest
     {
         return [
             'status' => ['required', Rule::in(SalesRequest::STATUSES)],
+            'status_comment' => 'nullable|string|max:1000',
         ];
     }
 }

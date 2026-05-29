@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
 import { sessionState } from '../session';
-import type { ContactMessage, Motorcycle, Order, SalesRequest, ServiceRequest, User } from '../types';
+import type { ContactMessage, Motorcycle, Order, SalesRequest, ServiceRequest, StatusHistory, User } from '../types';
 
 interface DashboardStats {
   usersCount: number;
@@ -47,6 +47,7 @@ const salesRequests = ref<SalesRequest[]>([]);
 const serviceRequests = ref<ServiceRequest[]>([]);
 const users = ref<AdminUser[]>([]);
 const messages = ref<ContactMessage[]>([]);
+const statusHistories = ref<StatusHistory[]>([]);
 const stats = ref<DashboardStats>({
   usersCount: 0,
   ordersCount: 0,
@@ -212,6 +213,28 @@ function formatDate(value?: string | null): string {
   return value ? new Date(value).toLocaleString('ru-RU') : 'Не назначено';
 }
 
+function entityLabel(history: StatusHistory): string {
+  if (history.entity_type.includes('Order')) {
+    return `Заказ #${history.entity_id}`;
+  }
+
+  if (history.entity_type.includes('SalesRequest')) {
+    return `Заявка #${history.entity_id}`;
+  }
+
+  if (history.entity_type.includes('ServiceRequest')) {
+    return `Сервис #${history.entity_id}`;
+  }
+
+  return `Запись #${history.entity_id}`;
+}
+
+function askStatusComment(): string | null {
+  const comment = window.prompt('Комментарий менеджера к изменению статуса (можно оставить пустым):');
+
+  return comment?.trim() || null;
+}
+
 function paymentMethodLabel(method?: Order['payment_method']): string {
   switch (method) {
     case 'card_pickup':
@@ -368,6 +391,7 @@ async function loadDashboard() {
     serviceRequests.value = data.service_requests ?? [];
     users.value = data.users ?? [];
     messages.value = data.messages ?? [];
+    statusHistories.value = data.status_histories ?? [];
     stats.value = data.stats;
   } catch {
     errorText.value = 'Не удалось загрузить данные админ-панели.';
@@ -412,7 +436,10 @@ async function deleteMotorcycle(id: number) {
 
 async function updateOrderStatus(orderId: number, status: Order['status']) {
   try {
-    const { data } = await api.patch(`/admin/orders/${orderId}/status`, { status });
+    const { data } = await api.patch(`/admin/orders/${orderId}/status`, {
+      status,
+      status_comment: askStatusComment(),
+    });
     successText.value = data.message;
     await loadDashboard();
   } catch {
@@ -422,7 +449,10 @@ async function updateOrderStatus(orderId: number, status: Order['status']) {
 
 async function updateSalesStatus(requestId: number, status: SalesRequest['status']) {
   try {
-    const { data } = await api.patch(`/admin/sales-requests/${requestId}/status`, { status });
+    const { data } = await api.patch(`/admin/sales-requests/${requestId}/status`, {
+      status,
+      status_comment: askStatusComment(),
+    });
     successText.value = data.message;
     await loadDashboard();
   } catch {
@@ -446,7 +476,10 @@ async function deleteSalesRequest(requestId: number) {
 
 async function updateServiceStatus(requestId: number, status: ServiceRequest['status']) {
   try {
-    const { data } = await api.patch(`/admin/service-requests/${requestId}/status`, { status });
+    const { data } = await api.patch(`/admin/service-requests/${requestId}/status`, {
+      status,
+      status_comment: askStatusComment(),
+    });
     successText.value = data.message;
     await loadDashboard();
   } catch {
@@ -650,6 +683,27 @@ onMounted(loadDashboard);
                 </div>
               </section>
             </div>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="px-5 py-4 border-b border-white/5">
+                <h3 class="text-xl font-display font-bold text-white uppercase">Журнал статусов</h3>
+                <p class="text-gray-500 text-sm mt-1">Кто и почему менял статусы заказов, заявок и сервиса.</p>
+              </div>
+              <div class="divide-y divide-white/5">
+                <article v-for="history in statusHistories.slice(0, 8)" :key="history.id" class="p-4 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+                  <div>
+                    <p class="text-white font-bold">{{ entityLabel(history) }}</p>
+                    <p class="text-gray-500 text-sm">
+                      {{ history.old_status || '—' }} → {{ history.new_status }}
+                      <span v-if="history.user"> · {{ history.user.name }}</span>
+                    </p>
+                    <p v-if="history.comment" class="text-gray-400 text-sm mt-2">{{ history.comment }}</p>
+                  </div>
+                  <p class="text-gray-600 text-xs lg:text-right">{{ formatDate(history.created_at) }}</p>
+                </article>
+                <div v-if="!statusHistories.length" class="empty-panel">Истории изменений пока нет.</div>
+              </div>
+            </section>
           </section>
 
           <section v-show="activeTab === 'orders'" class="space-y-3">
