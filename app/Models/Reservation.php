@@ -12,6 +12,7 @@ class Reservation extends Model
         'user_id',
         'order_id',
         'motorcycle_id',
+        'quantity',
         'status',
         'expires_at',
         'released_at',
@@ -20,6 +21,7 @@ class Reservation extends Model
     protected $casts = [
         'expires_at' => 'datetime',
         'released_at' => 'datetime',
+        'quantity' => 'integer',
     ];
 
     public function user()

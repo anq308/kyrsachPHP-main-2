@@ -36,6 +36,8 @@ class StoreMotorcycleRequest extends FormRequest
                 },
             ],
             'is_available' => 'boolean',
+            'stock_quantity' => 'nullable|integer|min:0',
+            'reserved_quantity' => 'nullable|integer|min:0',
             'transmission' => 'nullable|string|max:255',
             'cooling' => 'nullable|string|max:255',
             'fuel_system' => 'nullable|string|max:255',

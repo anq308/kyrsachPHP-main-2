@@ -33,20 +33,31 @@ class OrderLifecycleService
     private function syncReservations(Order $order): void
     {
         if ($order->status === 'cancelled') {
-            $order->reservations()->where('status', 'active')->update([
-                'status' => 'released',
-                'released_at' => now(),
-            ]);
+            foreach ($order->reservations()->with('motorcycle')->where('status', 'active')->get() as $reservation) {
+                $reservation->update([
+                    'status' => 'released',
+                    'released_at' => now(),
+                ]);
 
-            foreach ($order->items as $item) {
-                $item->motorcycle?->update(['is_available' => true]);
+                if ($reservation->motorcycle) {
+                    $reservation->motorcycle->decrement('reserved_quantity', min($reservation->quantity, $reservation->motorcycle->reserved_quantity));
+                    $reservation->motorcycle->refreshAvailability();
+                }
             }
         }
 
         if ($order->status === 'completed') {
-            $order->reservations()->where('status', 'active')->update([
-                'status' => 'completed',
-            ]);
+            foreach ($order->reservations()->with('motorcycle')->where('status', 'active')->get() as $reservation) {
+                $reservation->update([
+                    'status' => 'completed',
+                ]);
+
+                if ($reservation->motorcycle) {
+                    $reservation->motorcycle->decrement('reserved_quantity', min($reservation->quantity, $reservation->motorcycle->reserved_quantity));
+                    $reservation->motorcycle->decrement('stock_quantity', min($reservation->quantity, $reservation->motorcycle->stock_quantity));
+                    $reservation->motorcycle->refreshAvailability();
+                }
+            }
         }
     }
 

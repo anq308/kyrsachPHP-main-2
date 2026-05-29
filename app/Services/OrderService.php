@@ -59,11 +59,13 @@ class OrderService
                     'user_id' => $userId,
                     'order_id' => $order->id,
                     'motorcycle_id' => $item['motorcycle']->id,
+                    'quantity' => $item['quantity'],
                     'status' => 'active',
                     'expires_at' => now()->addDays(2),
                 ]);
 
-                $item['motorcycle']->update(['is_available' => false]);
+                $item['motorcycle']->increment('reserved_quantity', $item['quantity']);
+                $item['motorcycle']->refreshAvailability();
             }
 
             $this->paymentService->createForOrder($order, $customerData['payment_method']);
@@ -92,13 +94,19 @@ class OrderService
             }
 
             $motorcycle = Motorcycle::find((int) $id);
-            if (! $motorcycle || ! $motorcycle->is_available || $this->hasActiveReservation($motorcycle)) {
+            if (! $motorcycle) {
                 throw ValidationException::withMessages([
                     'cart' => 'Один из товаров больше недоступен для заказа.',
                 ]);
             }
 
             $quantity = max(1, (int) ($item['quantity'] ?? 1));
+            if (! $motorcycle->canReserve($quantity)) {
+                throw ValidationException::withMessages([
+                    'cart' => 'Один из товаров больше недоступен для заказа.',
+                ]);
+            }
+
             $price = (int) $motorcycle->price;
 
             $items[] = [
@@ -111,15 +119,5 @@ class OrderService
         }
 
         return $items;
-    }
-
-    private function hasActiveReservation(Motorcycle $motorcycle): bool
-    {
-        return $motorcycle->reservations()
-            ->where('status', 'active')
-            ->where(function ($query) {
-                $query->whereNull('expires_at')->orWhere('expires_at', '>', now());
-            })
-            ->exists();
     }
 }

@@ -21,6 +21,8 @@ export interface Motorcycle {
   description: string;
   image_url: string;
   is_available: boolean;
+  stock_quantity: number;
+  reserved_quantity: number;
   transmission?: string | null;
   cooling?: string | null;
   fuel_system?: string | null;
@@ -74,6 +76,7 @@ export interface Reservation {
   user_id: number | null;
   order_id: number;
   motorcycle_id: number;
+  quantity: number;
   status: 'active' | 'released' | 'expired' | 'completed';
   expires_at: string | null;
   released_at: string | null;

@@ -14,14 +14,15 @@ class CartService
 
     public function add(Motorcycle $motorcycle): array
     {
-        if (! $motorcycle->is_available) {
+        $cart = $this->raw();
+        $id = (string) $motorcycle->id;
+        $desiredQuantity = (int) ($cart[$id]['quantity'] ?? 0) + 1;
+
+        if (! $motorcycle->canReserve($desiredQuantity)) {
             throw ValidationException::withMessages([
                 'motorcycle' => 'Товар сейчас недоступен для заказа.',
             ]);
         }
-
-        $cart = $this->raw();
-        $id = (string) $motorcycle->id;
 
         if (isset($cart[$id])) {
             $cart[$id]['quantity']++;

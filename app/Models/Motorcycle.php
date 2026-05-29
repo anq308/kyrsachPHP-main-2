@@ -21,6 +21,8 @@ class Motorcycle extends Model
         'description',
         'image_url',
         'is_available',
+        'stock_quantity',
+        'reserved_quantity',
         'transmission', // New
         'cooling',      // New
         'fuel_system',  // New
@@ -31,7 +33,26 @@ class Motorcycle extends Model
 
     protected $casts = [
         'is_available' => 'boolean',
+        'stock_quantity' => 'integer',
+        'reserved_quantity' => 'integer',
     ];
+
+    public function availableStock(): int
+    {
+        return max(0, (int) $this->stock_quantity - (int) $this->reserved_quantity);
+    }
+
+    public function canReserve(int $quantity = 1): bool
+    {
+        return $this->is_available && $this->availableStock() >= $quantity;
+    }
+
+    public function refreshAvailability(): void
+    {
+        $this->forceFill([
+            'is_available' => $this->availableStock() > 0,
+        ])->save();
+    }
 
     public function salesRequests()
     {

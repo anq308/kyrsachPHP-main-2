@@ -145,6 +145,8 @@ class BackendWorkflowTest extends TestCase
             'model' => 'Enduro 250',
             'price' => 100000,
             'is_available' => true,
+            'stock_quantity' => 1,
+            'reserved_quantity' => 0,
         ]);
 
         $this->postJson("/api/cart/{$motorcycle->id}")
@@ -174,6 +176,8 @@ class BackendWorkflowTest extends TestCase
         $motorcycle = Motorcycle::factory()->create([
             'price' => 180000,
             'is_available' => true,
+            'stock_quantity' => 1,
+            'reserved_quantity' => 0,
         ]);
 
         $this->actingAs($user)
@@ -196,10 +200,12 @@ class BackendWorkflowTest extends TestCase
         $this->assertSame('paid', $order->payment_status);
         $this->assertSame($pickupPoint->id, $order->pickup_point_id);
         $this->assertFalse($motorcycle->fresh()->is_available);
+        $this->assertSame(1, $motorcycle->fresh()->reserved_quantity);
         $this->assertDatabaseHas('reservations', [
             'user_id' => $user->id,
             'order_id' => $order->id,
             'motorcycle_id' => $motorcycle->id,
+            'quantity' => 1,
             'status' => 'active',
         ]);
         $this->assertDatabaseHas('client_notifications', [
@@ -222,7 +228,11 @@ class BackendWorkflowTest extends TestCase
         $admin = User::factory()->create(['is_admin' => true]);
         $customer = User::factory()->create();
         $pickupPoint = $this->pickupPoint();
-        $motorcycle = Motorcycle::factory()->create(['is_available' => false]);
+        $motorcycle = Motorcycle::factory()->create([
+            'is_available' => false,
+            'stock_quantity' => 1,
+            'reserved_quantity' => 1,
+        ]);
         $order = Order::create([
             'user_id' => $customer->id,
             'name' => 'Клиент',

@@ -73,6 +73,8 @@ const form = reactive({
   description: '',
   image_url: '/images/product_enduro_1.png',
   is_available: true,
+  stock_quantity: 1,
+  reserved_quantity: 0,
   transmission: '',
   cooling: '',
   fuel_system: '',
@@ -345,6 +347,8 @@ function resetForm() {
   form.description = '';
   form.image_url = '/images/product_enduro_1.png';
   form.is_available = true;
+  form.stock_quantity = 1;
+  form.reserved_quantity = 0;
   form.transmission = '';
   form.cooling = '';
   form.fuel_system = '';
@@ -371,6 +375,8 @@ function editMotorcycle(moto: Motorcycle) {
   form.description = moto.description;
   form.image_url = moto.image_url;
   form.is_available = moto.is_available;
+  form.stock_quantity = moto.stock_quantity ?? 1;
+  form.reserved_quantity = moto.reserved_quantity ?? 0;
   form.transmission = moto.transmission ?? '';
   form.cooling = moto.cooling ?? '';
   form.fuel_system = moto.fuel_system ?? '';
@@ -875,6 +881,8 @@ onMounted(loadDashboard);
                 <input v-model.number="form.engine_capacity" type="number" class="field-dark" placeholder="Объём" required />
                 <input v-model.number="form.power" type="number" class="field-dark" placeholder="Мощность" required />
                 <input v-model.number="form.price" type="number" class="field-dark" placeholder="Цена" required />
+                <input v-model.number="form.stock_quantity" type="number" min="0" class="field-dark" placeholder="Кол-во на складе" />
+                <input v-model.number="form.reserved_quantity" type="number" min="0" class="field-dark" placeholder="В резерве" />
                 <input v-model="form.image_url" class="field-dark" placeholder="URL картинки" required />
                 <input v-model="form.transmission" class="field-dark" placeholder="КПП" />
                 <input v-model="form.cooling" class="field-dark" placeholder="Охлаждение" />
@@ -965,7 +973,10 @@ onMounted(loadDashboard);
                             </div>
                           </div>
                         </td>
-                        <td class="hidden md:table-cell"><span class="px-2 py-1 bg-white/5 text-gray-400 text-xs font-bold uppercase">{{ motorcycle.type }}</span></td>
+                        <td class="hidden md:table-cell">
+                          <span class="px-2 py-1 bg-white/5 text-gray-400 text-xs font-bold uppercase">{{ motorcycle.type }}</span>
+                          <p class="text-gray-600 text-xs mt-2">Склад: {{ motorcycle.stock_quantity ?? 0 }} · Резерв: {{ motorcycle.reserved_quantity ?? 0 }}</p>
+                        </td>
                         <td><span class="text-primary font-bold font-display text-lg">{{ formatCurrency(motorcycle.price) }}</span></td>
                         <td class="hidden md:table-cell"><StatusBadge :status="motorcycle.is_available ? 'available' : 'unavailable'" kind="product" /></td>
                         <td class="text-right">

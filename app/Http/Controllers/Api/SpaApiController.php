@@ -545,9 +545,12 @@ class SpaApiController extends Controller
     public function adminStoreMotorcycle(StoreMotorcycleRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        $validated['stock_quantity'] = (int) ($validated['stock_quantity'] ?? 1);
+        $validated['reserved_quantity'] = min((int) ($validated['reserved_quantity'] ?? 0), $validated['stock_quantity']);
         $validated['is_available'] = $request->boolean('is_available');
 
         $motorcycle = Motorcycle::create($validated);
+        $motorcycle->refreshAvailability();
 
         return response()->json([
             'message' => 'Товар успешно добавлен.',
@@ -558,10 +561,13 @@ class SpaApiController extends Controller
     public function adminUpdateMotorcycle(StoreMotorcycleRequest $request, string $id): JsonResponse
     {
         $validated = $request->validated();
+        $validated['stock_quantity'] = (int) ($validated['stock_quantity'] ?? 1);
+        $validated['reserved_quantity'] = min((int) ($validated['reserved_quantity'] ?? 0), $validated['stock_quantity']);
         $validated['is_available'] = $request->boolean('is_available');
 
         $motorcycle = Motorcycle::findOrFail($id);
         $motorcycle->update($validated);
+        $motorcycle->refreshAvailability();
 
         return response()->json([
             'message' => 'Товар успешно обновлён.',
