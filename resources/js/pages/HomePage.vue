@@ -73,18 +73,18 @@ async function submitLeadForm() {
 
 <template>
   <div>
-    <div class="relative bg-dark overflow-hidden min-h-screen flex items-center">
+    <div class="relative bg-dark overflow-hidden min-h-[calc(100vh-5rem)] flex items-center py-20 md:py-24">
       <div class="absolute inset-0 z-0">
         <img :src="'/images/hero_bg.png'" class="w-full h-full object-cover opacity-40 scale-110" alt="Motocross Action" />
         <div class="absolute inset-0 bg-gradient-to-r from-dark via-dark/80 to-transparent" />
         <div class="absolute inset-0 bg-gradient-to-t from-dark via-transparent to-transparent" />
       </div>
 
-      <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full pt-20">
+      <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         <div class="max-w-4xl">
           <h1 class="text-5xl md:text-7xl lg:text-8xl font-bold font-display italic text-white leading-none mb-8 tracking-normal shadow-orange-glow">
             <span class="text-gradient">Продажа и сервисное</span>
-            <span class="block text-stroke text-transparent">обслуживание мототехники AVANTIS</span>
+            <span class="block text-hero-fill">обслуживание мототехники AVANTIS</span>
           </h1>
           <p class="text-gray-300 text-lg md:text-2xl max-w-2xl font-light mb-12 border-l-4 border-primary pl-6">
             Информационная система для выбора техники, оформления заказов, обработки заявок и записи клиентов на сервисное обслуживание.
@@ -121,7 +121,7 @@ async function submitLeadForm() {
         </div>
       </div>
 
-      <div class="absolute bottom-0 right-0 w-2/3 h-32 bg-dark-lighter clip-diagonal-reverse z-20 hidden md:block" />
+      <div class="absolute bottom-0 right-0 w-2/3 h-20 bg-dark-lighter clip-diagonal-reverse z-[1] hidden md:block" />
     </div>
 
     <section class="py-20 bg-dark-lighter border-y border-white/5">

@@ -48,6 +48,15 @@ const salesStatusFilter = ref<'all' | SalesRequest['status']>('all');
 const serviceStatusFilter = ref<'all' | ServiceRequest['status']>('all');
 const showProductForm = ref(false);
 const expandedOrders = ref<number[]>([]);
+const statusCommentModalOpen = ref(false);
+const statusCommentText = ref('');
+const statusCommentSaving = ref(false);
+const pendingStatusAction = ref<{
+  title: string;
+  subtitle: string;
+  onConfirm: (comment: string | null) => Promise<void>;
+  onCancel?: () => void;
+} | null>(null);
 
 const motorcycles = ref<Motorcycle[]>([]);
 const orders = ref<Order[]>([]);
@@ -246,12 +255,6 @@ function entityLabel(history: StatusHistory): string {
   return `Запись #${history.entity_id}`;
 }
 
-function askStatusComment(): string | null {
-  const comment = window.prompt('Комментарий менеджера к изменению статуса (можно оставить пустым):');
-
-  return comment?.trim() || null;
-}
-
 function paymentMethodLabel(method?: Order['payment_method']): string {
   switch (method) {
     case 'card_pickup':
@@ -347,6 +350,39 @@ function toggleOrderDetails(id: number) {
 
 function isOrderExpanded(id: number): boolean {
   return expandedOrders.value.includes(id);
+}
+
+function openStatusCommentModal(payload: NonNullable<typeof pendingStatusAction.value>) {
+  statusCommentText.value = '';
+  pendingStatusAction.value = payload;
+  statusCommentModalOpen.value = true;
+}
+
+function closeStatusCommentModal() {
+  pendingStatusAction.value?.onCancel?.();
+  pendingStatusAction.value = null;
+  statusCommentText.value = '';
+  statusCommentModalOpen.value = false;
+  statusCommentSaving.value = false;
+}
+
+async function submitStatusCommentModal() {
+  if (!pendingStatusAction.value || statusCommentSaving.value) {
+    return;
+  }
+
+  statusCommentSaving.value = true;
+  const action = pendingStatusAction.value;
+  const comment = statusCommentText.value.trim() || null;
+
+  try {
+    await action.onConfirm(comment);
+    pendingStatusAction.value = null;
+    statusCommentText.value = '';
+    statusCommentModalOpen.value = false;
+  } finally {
+    statusCommentSaving.value = false;
+  }
 }
 
 function resetForm() {
@@ -456,11 +492,11 @@ async function deleteMotorcycle(id: number) {
   }
 }
 
-async function updateOrderStatus(orderId: number, status: Order['status']) {
+async function updateOrderStatus(orderId: number, status: Order['status'], statusComment: string | null = null) {
   try {
     const { data } = await api.patch(`/admin/orders/${orderId}/status`, {
       status,
-      status_comment: askStatusComment(),
+      status_comment: statusComment,
     });
     successText.value = data.message;
     await loadDashboard();
@@ -469,17 +505,51 @@ async function updateOrderStatus(orderId: number, status: Order['status']) {
   }
 }
 
-async function updateSalesStatus(requestId: number, status: SalesRequest['status']) {
+function requestOrderStatusUpdate(order: Order, select: HTMLSelectElement) {
+  const nextStatus = select.value as Order['status'];
+
+  if (nextStatus === order.status) {
+    return;
+  }
+
+  openStatusCommentModal({
+    title: `Заказ #${order.id}`,
+    subtitle: 'Комментарий сохранится в истории статусов и поможет менеджеру понять причину изменения.',
+    onConfirm: (comment) => updateOrderStatus(order.id, nextStatus, comment),
+    onCancel: () => {
+      select.value = order.status;
+    },
+  });
+}
+
+async function updateSalesStatus(requestId: number, status: SalesRequest['status'], statusComment: string | null = null) {
   try {
     const { data } = await api.patch(`/admin/sales-requests/${requestId}/status`, {
       status,
-      status_comment: askStatusComment(),
+      status_comment: statusComment,
     });
     successText.value = data.message;
     await loadDashboard();
   } catch {
     errorText.value = 'Не удалось обновить статус заявки.';
   }
+}
+
+function requestSalesStatusUpdate(request: SalesRequest, select: HTMLSelectElement) {
+  const nextStatus = select.value as SalesRequest['status'];
+
+  if (nextStatus === request.status) {
+    return;
+  }
+
+  openStatusCommentModal({
+    title: `Заявка #${request.id}`,
+    subtitle: 'Добавьте короткий комментарий для истории обработки заявки на покупку.',
+    onConfirm: (comment) => updateSalesStatus(request.id, nextStatus, comment),
+    onCancel: () => {
+      select.value = request.status;
+    },
+  });
 }
 
 async function deleteSalesRequest(requestId: number) {
@@ -496,17 +566,34 @@ async function deleteSalesRequest(requestId: number) {
   }
 }
 
-async function updateServiceStatus(requestId: number, status: ServiceRequest['status']) {
+async function updateServiceStatus(requestId: number, status: ServiceRequest['status'], statusComment: string | null = null) {
   try {
     const { data } = await api.patch(`/admin/service-requests/${requestId}/status`, {
       status,
-      status_comment: askStatusComment(),
+      status_comment: statusComment,
     });
     successText.value = data.message;
     await loadDashboard();
   } catch {
     errorText.value = 'Не удалось обновить статус сервисной заявки.';
   }
+}
+
+function requestServiceStatusUpdate(request: ServiceRequest, select: HTMLSelectElement) {
+  const nextStatus = select.value as ServiceRequest['status'];
+
+  if (nextStatus === request.status) {
+    return;
+  }
+
+  openStatusCommentModal({
+    title: `Сервис #${request.id}`,
+    subtitle: 'Комментарий будет виден в журнале статусов сервисной записи.',
+    onConfirm: (comment) => updateServiceStatus(request.id, nextStatus, comment),
+    onCancel: () => {
+      select.value = request.status;
+    },
+  });
 }
 
 async function deleteServiceRequest(requestId: number) {
@@ -570,8 +657,30 @@ onMounted(loadDashboard);
       <p v-if="loading" class="text-gray-500 py-10">Загрузка панели...</p>
 
       <div v-else class="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-6">
-        <aside class="space-y-4">
-          <section class="bg-dark-lighter border border-white/5 p-4 xl:sticky xl:top-6">
+        <aside class="space-y-4 xl:sticky xl:top-6 xl:self-start xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto xl:pr-1">
+          <section class="bg-dark-lighter border border-white/5 p-4">
+            <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-3">Склад</p>
+            <div class="space-y-3 text-sm">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Всего товаров</span>
+                <span class="text-white font-bold">{{ motorcycles.length }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">В наличии</span>
+                <span class="text-green-300 font-bold">{{ inventorySummary.availableCount }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Нет в наличии</span>
+                <span class="text-red-300 font-bold">{{ unavailableMotorcycles.length }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Сумма продаж</span>
+                <span class="text-primary font-bold">{{ formatCurrency(stats.totalRevenue) }}</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="bg-dark-lighter border border-white/5 p-4">
             <div class="flex items-center justify-between gap-3 mb-4">
               <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Разделы</p>
               <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="loadDashboard">Обновить</button>
@@ -597,28 +706,6 @@ onMounted(loadDashboard);
             <button type="button" class="btn btn-primary w-full mt-4" @click="openCreateMotorcycleForm">
               <span>Добавить товар</span>
             </button>
-          </section>
-
-          <section class="bg-dark-lighter border border-white/5 p-4">
-            <p class="text-xs text-gray-600 font-bold uppercase tracking-wider mb-3">Склад</p>
-            <div class="space-y-3 text-sm">
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-gray-500">Всего товаров</span>
-                <span class="text-white font-bold">{{ motorcycles.length }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-gray-500">В наличии</span>
-                <span class="text-green-300 font-bold">{{ inventorySummary.availableCount }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-gray-500">Нет в наличии</span>
-                <span class="text-red-300 font-bold">{{ unavailableMotorcycles.length }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-gray-500">Сумма продаж</span>
-                <span class="text-primary font-bold">{{ formatCurrency(stats.totalRevenue) }}</span>
-              </div>
-            </div>
           </section>
         </aside>
 
@@ -788,7 +875,7 @@ onMounted(loadDashboard);
 
                 <div class="flex flex-col sm:flex-row sm:items-center gap-3 lg:justify-end">
                   <span class="text-primary font-display font-bold text-xl">{{ formatCurrency(order.total) }}</span>
-                  <select class="field-dark sm:w-56" :value="order.status" @change="updateOrderStatus(order.id, ($event.target as HTMLSelectElement).value as Order['status'])">
+                  <select class="field-dark sm:w-56" :value="order.status" @change="requestOrderStatusUpdate(order, $event.target as HTMLSelectElement)">
                     <option v-for="option in orderStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                   </select>
                   <button type="button" class="filter-chip" @click="toggleOrderDetails(order.id)">{{ isOrderExpanded(order.id) ? 'Скрыть' : 'Детали' }}</button>
@@ -851,7 +938,7 @@ onMounted(loadDashboard);
                 <p class="text-gray-500 text-sm mt-1">{{ request.name }} · {{ request.phone }} · {{ request.email || 'email не указан' }}</p>
                 <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
                 <div class="flex gap-2 mt-5">
-                  <select class="field-dark flex-1" :value="request.status" @change="updateSalesStatus(request.id, ($event.target as HTMLSelectElement).value as SalesRequest['status'])">
+                  <select class="field-dark flex-1" :value="request.status" @change="requestSalesStatusUpdate(request, $event.target as HTMLSelectElement)">
                     <option value="new">Новая</option>
                     <option value="in_progress">В работе</option>
                     <option value="approved">Согласована</option>
@@ -888,7 +975,7 @@ onMounted(loadDashboard);
                 <p class="text-gray-500 text-sm mt-2">Желаемая дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
                 <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
                 <div class="flex gap-2 mt-5">
-                  <select class="field-dark flex-1" :value="request.status" @change="updateServiceStatus(request.id, ($event.target as HTMLSelectElement).value as ServiceRequest['status'])">
+                  <select class="field-dark flex-1" :value="request.status" @change="requestServiceStatusUpdate(request, $event.target as HTMLSelectElement)">
                     <option value="new">Новая</option>
                     <option value="confirmed">Подтверждена</option>
                     <option value="in_service">В сервисе</option>
@@ -1119,5 +1206,47 @@ onMounted(loadDashboard);
         </div>
       </div>
     </main>
+
+    <Teleport to="body">
+      <div
+        v-if="statusCommentModalOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        @keydown.esc="closeStatusCommentModal"
+      >
+        <div class="absolute inset-0" @click="closeStatusCommentModal" />
+        <section class="relative w-full max-w-xl overflow-hidden border border-primary/30 bg-dark-lighter shadow-2xl shadow-primary/10">
+          <div class="absolute inset-x-0 top-0 h-1 bg-primary" />
+          <div class="p-5 sm:p-6">
+            <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-3">Изменение статуса</p>
+            <h3 class="text-2xl sm:text-3xl font-display font-bold text-white uppercase italic">{{ pendingStatusAction?.title }}</h3>
+            <p class="text-gray-500 text-sm mt-2 leading-relaxed">{{ pendingStatusAction?.subtitle }}</p>
+
+            <label class="block mt-6">
+              <span class="block text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">Комментарий менеджера</span>
+              <textarea
+                v-model="statusCommentText"
+                class="field-dark min-h-32 resize-none"
+                placeholder="Например: клиент подтвердил выдачу, ожидаем оплату..."
+                autofocus
+              />
+            </label>
+
+            <div class="mt-6 flex flex-col sm:flex-row sm:justify-end gap-3">
+              <button type="button" class="btn btn-outline" :disabled="statusCommentSaving" @click="closeStatusCommentModal">
+                <span>Отмена</span>
+              </button>
+              <button type="button" class="btn btn-outline" :disabled="statusCommentSaving" @click="statusCommentText = ''; submitStatusCommentModal()">
+                <span>Без комментария</span>
+              </button>
+              <button type="button" class="btn btn-primary" :disabled="statusCommentSaving" @click="submitStatusCommentModal">
+                <span>{{ statusCommentSaving ? 'Сохранение...' : 'Сохранить' }}</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>

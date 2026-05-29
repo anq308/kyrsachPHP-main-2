@@ -63,6 +63,12 @@
         -webkit-text-fill-color: transparent;
     }
 
+    .text-hero-fill {
+        color: rgba(255, 255, 255, 0.8);
+        -webkit-text-stroke: 1px rgba(255, 255, 255, 0.18);
+        text-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
+    }
+
     .shadow-orange-glow {
         text-shadow: 2px 2px 0 #ff4500, 0 0 20px rgba(255, 69, 0, 0.3);
     }
