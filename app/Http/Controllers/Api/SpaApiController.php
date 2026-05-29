@@ -24,6 +24,7 @@ use App\Models\ServiceRequest;
 use App\Models\User;
 use App\Services\AdminDashboardService;
 use App\Services\CartService;
+use App\Services\ClientNotificationService;
 use App\Services\OrderLifecycleService;
 use App\Services\OrderService;
 use App\Services\StatusHistoryService;
@@ -41,6 +42,7 @@ class SpaApiController extends Controller
         private CartService $cartService,
         private OrderService $orderService,
         private OrderLifecycleService $orderLifecycleService,
+        private ClientNotificationService $notificationService,
         private StatusHistoryService $statusHistoryService
     ) {}
 
@@ -609,6 +611,7 @@ class SpaApiController extends Controller
         $salesRequest->update(['status' => $request->input('status')]);
         $this->statusHistoryService->record($salesRequest, $oldStatus, $salesRequest->status, $request->user(), $request->input('status_comment'));
         $salesRequest->load(['user', 'motorcycle']);
+        $this->notifySalesRequestCustomer($salesRequest, $oldStatus);
 
         return response()->json([
             'message' => 'Статус заявки #'.$salesRequest->id.' обновлён.',
@@ -633,6 +636,7 @@ class SpaApiController extends Controller
         $serviceRequest->update(['status' => $request->input('status')]);
         $this->statusHistoryService->record($serviceRequest, $oldStatus, $serviceRequest->status, $request->user(), $request->input('status_comment'));
         $serviceRequest->load('user');
+        $this->notifyServiceRequestCustomer($serviceRequest, $oldStatus);
 
         return response()->json([
             'message' => 'Статус сервисной заявки #'.$serviceRequest->id.' обновлён.',
@@ -686,6 +690,44 @@ class SpaApiController extends Controller
             'can_manage' => $user->canManagePanel(),
             'created_at' => optional($user->created_at)?->toISOString(),
         ];
+    }
+
+    private function notifySalesRequestCustomer(SalesRequest $salesRequest, ?string $oldStatus): void
+    {
+        if ($oldStatus === $salesRequest->status) {
+            return;
+        }
+
+        $messages = [
+            'in_progress' => ['Заявка принята в работу', "Менеджер начал обработку заявки #{$salesRequest->id}."],
+            'approved' => ['Заявка согласована', "Заявка #{$salesRequest->id} согласована. Менеджер уточнит детали покупки."],
+            'completed' => ['Заявка завершена', "Заявка #{$salesRequest->id} завершена."],
+            'cancelled' => ['Заявка отменена', "Заявка #{$salesRequest->id} отменена."],
+        ];
+
+        if (isset($messages[$salesRequest->status])) {
+            [$title, $message] = $messages[$salesRequest->status];
+            $this->notificationService->create($salesRequest->user, $title, $message, 'sales_request');
+        }
+    }
+
+    private function notifyServiceRequestCustomer(ServiceRequest $serviceRequest, ?string $oldStatus): void
+    {
+        if ($oldStatus === $serviceRequest->status) {
+            return;
+        }
+
+        $messages = [
+            'confirmed' => ['Запись на сервис подтверждена', "Сервисная заявка #{$serviceRequest->id} подтверждена."],
+            'in_service' => ['Техника в сервисе', "По заявке #{$serviceRequest->id} начались сервисные работы."],
+            'done' => ['Сервис завершён', "Работы по сервисной заявке #{$serviceRequest->id} завершены."],
+            'cancelled' => ['Сервисная запись отменена', "Сервисная заявка #{$serviceRequest->id} отменена."],
+        ];
+
+        if (isset($messages[$serviceRequest->status])) {
+            [$title, $message] = $messages[$serviceRequest->status];
+            $this->notificationService->create($serviceRequest->user, $title, $message, 'service_request');
+        }
     }
 
     private function catalogFilters(): array

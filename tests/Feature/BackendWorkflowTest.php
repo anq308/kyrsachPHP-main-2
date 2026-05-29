@@ -109,10 +109,41 @@ class BackendWorkflowTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_service_status_update_notifies_customer(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $customer = User::factory()->create();
+        $serviceRequest = ServiceRequest::create([
+            'user_id' => $customer->id,
+            'name' => 'Клиент сервиса',
+            'phone' => '+79990000111',
+            'motorcycle_model' => 'AVANTIS Enduro 250',
+            'service_type' => 'Диагностика',
+            'status' => 'new',
+        ]);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/admin/service-requests/{$serviceRequest->id}/status", [
+                'status' => 'confirmed',
+                'status_comment' => 'Согласовали дату визита.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('service_request.status', 'confirmed');
+
+        $this->assertDatabaseHas('client_notifications', [
+            'user_id' => $customer->id,
+            'title' => 'Запись на сервис подтверждена',
+            'type' => 'service_request',
+            'is_read' => false,
+        ]);
+    }
+
     public function test_admin_status_update_creates_history_record(): void
     {
         $admin = User::factory()->create(['is_admin' => true]);
+        $customer = User::factory()->create();
         $salesRequest = SalesRequest::create([
+            'user_id' => $customer->id,
             'name' => 'Клиент',
             'phone' => '+79990000001',
             'email' => 'client@example.com',
@@ -135,6 +166,12 @@ class BackendWorkflowTest extends TestCase
             'new_status' => 'in_progress',
             'user_id' => $admin->id,
             'comment' => 'Клиенту позвонили, ждём решение.',
+        ]);
+        $this->assertDatabaseHas('client_notifications', [
+            'user_id' => $customer->id,
+            'title' => 'Заявка принята в работу',
+            'type' => 'sales_request',
+            'is_read' => false,
         ]);
     }
 
