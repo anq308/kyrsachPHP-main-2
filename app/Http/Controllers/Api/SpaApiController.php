@@ -544,6 +544,58 @@ class SpaApiController extends Controller
         return response()->json($this->adminDashboardService->payload());
     }
 
+    public function adminOrdersIndex(Request $request): JsonResponse
+    {
+        $query = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle', 'payments'])->latest();
+
+        if ($request->filled('status') && in_array($request->input('status'), Order::STATUSES, true)) {
+            $query->where('status', $request->input('status'));
+        }
+
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->input('date_from'));
+        }
+
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->input('date_to'));
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('id', $search);
+            });
+        }
+
+        return response()->json([
+            'orders' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
+    public function adminUsersIndex(Request $request): JsonResponse
+    {
+        $query = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest();
+
+        if ($request->filled('role') && in_array($request->input('role'), User::ROLES, true)) {
+            $query->where('role', $request->input('role'));
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+
+        return response()->json([
+            'users' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
     public function adminStoreMotorcycle(StoreMotorcycleRequest $request): JsonResponse
     {
         $validated = $request->validated();

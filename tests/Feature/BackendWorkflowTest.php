@@ -360,6 +360,49 @@ class BackendWorkflowTest extends TestCase
             ->assertJsonPath('sales_requests.0.status', 'in_progress');
     }
 
+    public function test_admin_can_filter_orders_by_status_with_pagination(): void
+    {
+        $admin = User::factory()->create(['is_admin' => true]);
+        $pickupPoint = $this->pickupPoint();
+        Order::create([
+            'name' => 'Новый клиент',
+            'phone' => '+79990000201',
+            'total' => 100000,
+            'status' => 'new',
+            'payment_method' => 'cash_pickup',
+            'payment_status' => 'pending',
+            'pickup_point_id' => $pickupPoint->id,
+        ]);
+        Order::create([
+            'name' => 'Готовый клиент',
+            'phone' => '+79990000202',
+            'total' => 120000,
+            'status' => 'ready_for_pickup',
+            'payment_method' => 'card_pickup',
+            'payment_status' => 'pending',
+            'pickup_point_id' => $pickupPoint->id,
+        ]);
+
+        $this->actingAs($admin)
+            ->getJson('/api/admin/orders?status=ready_for_pickup&per_page=1')
+            ->assertOk()
+            ->assertJsonPath('orders.data.0.status', 'ready_for_pickup')
+            ->assertJsonPath('orders.per_page', 1);
+    }
+
+    public function test_admin_can_filter_users_by_role(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        User::factory()->create(['role' => User::ROLE_MANAGER, 'name' => 'Менеджер сервиса']);
+        User::factory()->create(['role' => User::ROLE_CLIENT, 'name' => 'Обычный клиент']);
+
+        $this->actingAs($admin)
+            ->getJson('/api/admin/users?role=manager')
+            ->assertOk()
+            ->assertJsonCount(1, 'users')
+            ->assertJsonPath('users.0.role', User::ROLE_MANAGER);
+    }
+
     public function test_admin_can_filter_service_requests_by_search(): void
     {
         $admin = User::factory()->create(['is_admin' => true]);
