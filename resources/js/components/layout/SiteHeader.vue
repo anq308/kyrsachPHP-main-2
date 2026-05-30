@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import api, { refreshCsrfToken } from '../../api';
-import { clearSession, sessionState } from '../../session';
+import { clearSession, loadSession, sessionState } from '../../session';
 
 const emit = defineEmits<{
   error: [message: string];
@@ -10,10 +10,19 @@ const emit = defineEmits<{
 
 const profileMenuOpen = ref(false);
 const mobileMenuOpen = ref(false);
+const roleSwitching = ref(false);
 
 const isAuth = computed(() => Boolean(sessionState.user));
 const isStaff = computed(() => Boolean(sessionState.user?.can_manage));
 const firstLetter = computed(() => sessionState.user?.name?.trim().charAt(0).toUpperCase() ?? 'U');
+
+const demoAccounts = [
+  { label: 'Админ', role: 'admin', email: 'admin@avantis.ru', redirect: '/admin' },
+  { label: 'Клиент', role: 'client', email: 'client@avantis.ru', redirect: '/profile' },
+  { label: 'Менеджер продаж', role: 'sales_manager', email: 'sales@avantis.ru', redirect: '/admin' },
+  { label: 'Менеджер сервиса', role: 'service_manager', email: 'service@avantis.ru', redirect: '/admin' },
+  { label: 'Кладовщик', role: 'warehouse_manager', email: 'warehouse@avantis.ru', redirect: '/admin' },
+];
 
 function closeMenuOnOutsideClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
@@ -58,6 +67,37 @@ async function logout() {
     }
 
     emit('error', 'Не удалось выйти из системы.');
+  }
+}
+
+async function switchDemoAccount(account: (typeof demoAccounts)[number]) {
+  if (roleSwitching.value || sessionState.user?.email === account.email) {
+    return;
+  }
+
+  roleSwitching.value = true;
+
+  try {
+    try {
+      await api.post('/logout');
+    } catch {
+      // Для демо-переключения достаточно очистить текущую сессию и выполнить новый вход.
+    }
+
+    clearSession();
+    await refreshCsrfToken();
+    await api.post('/login', {
+      email: account.email,
+      password: 'password',
+    });
+    await loadSession();
+    profileMenuOpen.value = false;
+    mobileMenuOpen.value = false;
+    window.location.href = account.redirect;
+  } catch (error: any) {
+    emit('error', error?.response?.data?.message ?? 'Не удалось переключить тестовую роль.');
+  } finally {
+    roleSwitching.value = false;
   }
 }
 </script>
@@ -130,7 +170,7 @@ async function logout() {
               </svg>
             </button>
 
-            <div v-show="profileMenuOpen" class="origin-top-right absolute right-0 mt-2 w-48 rounded-sm shadow-xl bg-dark-lighter border border-white/10 py-1 z-50">
+            <div v-show="profileMenuOpen" class="origin-top-right absolute right-0 mt-2 w-72 rounded-sm shadow-xl bg-dark-lighter border border-white/10 py-1 z-50">
               <RouterLink to="/profile" class="block px-4 py-2 text-sm text-gray-300 hover:bg-primary hover:text-white transition-colors" @click="profileMenuOpen = false">
                 Личный кабинет
               </RouterLink>
@@ -140,6 +180,24 @@ async function logout() {
               <RouterLink v-if="isStaff" to="/admin" class="block px-4 py-2 text-sm text-primary hover:bg-primary hover:text-white transition-colors font-bold" @click="profileMenuOpen = false">
                 Панель менеджера
               </RouterLink>
+              <div class="border-t border-white/10 my-1" />
+              <div class="px-4 py-2">
+                <p class="text-[10px] text-gray-600 font-bold uppercase tracking-[0.22em] mb-2">Быстрый вход по ролям</p>
+                <div class="space-y-1">
+                  <button
+                    v-for="account in demoAccounts"
+                    :key="account.email"
+                    type="button"
+                    class="w-full flex items-center justify-between gap-3 px-3 py-2 border text-left text-xs font-bold uppercase tracking-wider transition-colors"
+                    :class="sessionState.user?.email === account.email ? 'border-primary/50 bg-primary/10 text-primary' : 'border-white/5 bg-dark text-gray-400 hover:text-white hover:border-primary/40'"
+                    :disabled="roleSwitching || sessionState.user?.email === account.email"
+                    @click="switchDemoAccount(account)"
+                  >
+                    <span>{{ account.label }}</span>
+                    <span class="text-[10px] text-gray-600">{{ sessionState.user?.email === account.email ? 'сейчас' : 'войти' }}</span>
+                  </button>
+                </div>
+              </div>
               <div class="border-t border-white/10 my-1" />
               <button class="block w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-red-500/80 hover:text-white transition-colors" @click="logout">
                 Выйти
@@ -168,6 +226,20 @@ async function logout() {
         <RouterLink to="/contacts" class="mobile-nav-link" @click="mobileMenuOpen = false">Контакты</RouterLink>
         <RouterLink v-if="isAuth" to="/profile" class="mobile-nav-link" @click="mobileMenuOpen = false">Личный кабинет</RouterLink>
         <RouterLink v-if="isStaff" to="/admin" class="mobile-nav-link text-primary" @click="mobileMenuOpen = false">Панель менеджера</RouterLink>
+        <div v-if="isAuth" class="pt-2 border-t border-white/10">
+          <p class="px-3 py-2 text-[10px] text-gray-600 font-bold uppercase tracking-[0.22em]">Быстрый вход по ролям</p>
+          <button
+            v-for="account in demoAccounts"
+            :key="account.email"
+            type="button"
+            class="mobile-nav-link w-full text-left"
+            :class="sessionState.user?.email === account.email ? 'text-primary' : ''"
+            :disabled="roleSwitching || sessionState.user?.email === account.email"
+            @click="switchDemoAccount(account)"
+          >
+            {{ account.label }}
+          </button>
+        </div>
         <div v-if="!isAuth" class="grid grid-cols-2 gap-3 pt-2">
           <RouterLink to="/login" class="mobile-action-link" @click="mobileMenuOpen = false">Вход</RouterLink>
           <RouterLink to="/register" class="mobile-action-link bg-primary text-dark border-primary" @click="mobileMenuOpen = false">Регистрация</RouterLink>

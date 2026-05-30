@@ -38,6 +38,15 @@ class DatabaseSeeder extends Seeder
         );
 
         User::updateOrCreate(
+            ['email' => 'client@avantis.ru'],
+            [
+                'name' => 'Клиент AVANTIS',
+                'password' => Hash::make('password'),
+                'role' => User::ROLE_CLIENT,
+            ],
+        );
+
+        User::updateOrCreate(
             ['email' => 'sales@avantis.ru'],
             [
                 'name' => 'Менеджер продаж AVANTIS',
