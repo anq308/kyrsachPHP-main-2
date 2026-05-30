@@ -396,6 +396,7 @@ onMounted(loadProfile);
                   <p class="text-white font-display font-bold uppercase">#{{ request.id }} · {{ request.service_type }}</p>
                   <p class="text-gray-300 mt-2">{{ request.motorcycle_model }}</p>
                   <p class="text-gray-600 text-sm mt-1">Дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
+                  <p v-if="request.service_slot" class="text-gray-600 text-sm mt-1">Время: {{ request.service_slot.starts_at.slice(0, 5) }}-{{ request.service_slot.ends_at.slice(0, 5) }}</p>
                 </div>
                 <StatusBadge :status="request.status" kind="service" />
               </div>

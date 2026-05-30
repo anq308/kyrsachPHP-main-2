@@ -16,11 +16,20 @@ class User extends Authenticatable
 
     public const ROLE_MANAGER = 'manager';
 
+    public const ROLE_SALES_MANAGER = 'sales_manager';
+
+    public const ROLE_SERVICE_MANAGER = 'service_manager';
+
+    public const ROLE_WAREHOUSE_MANAGER = 'warehouse_manager';
+
     public const ROLE_ADMIN = 'admin';
 
     public const ROLES = [
         self::ROLE_CLIENT,
         self::ROLE_MANAGER,
+        self::ROLE_SALES_MANAGER,
+        self::ROLE_SERVICE_MANAGER,
+        self::ROLE_WAREHOUSE_MANAGER,
         self::ROLE_ADMIN,
     ];
 
@@ -72,12 +81,32 @@ class User extends Authenticatable
 
     public function isManager(): bool
     {
-        return $this->role === self::ROLE_MANAGER;
+        return in_array($this->role, [
+            self::ROLE_MANAGER,
+            self::ROLE_SALES_MANAGER,
+            self::ROLE_SERVICE_MANAGER,
+            self::ROLE_WAREHOUSE_MANAGER,
+        ], true);
     }
 
     public function canManagePanel(): bool
     {
         return $this->isAdmin() || $this->isManager();
+    }
+
+    public function canManageSales(): bool
+    {
+        return $this->isAdmin() || in_array($this->role, [self::ROLE_MANAGER, self::ROLE_SALES_MANAGER], true);
+    }
+
+    public function canManageService(): bool
+    {
+        return $this->isAdmin() || in_array($this->role, [self::ROLE_MANAGER, self::ROLE_SERVICE_MANAGER], true);
+    }
+
+    public function canManageWarehouse(): bool
+    {
+        return $this->isAdmin() || in_array($this->role, [self::ROLE_MANAGER, self::ROLE_WAREHOUSE_MANAGER], true);
     }
 
     public function orders()
@@ -113,6 +142,11 @@ class User extends Authenticatable
     public function payments()
     {
         return $this->hasMany(Payment::class);
+    }
+
+    public function auditLogs()
+    {
+        return $this->hasMany(AuditLog::class);
     }
 
     public function hasFavorite($motorcycleId): bool

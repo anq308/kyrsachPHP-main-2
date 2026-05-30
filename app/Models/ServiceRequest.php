@@ -10,6 +10,7 @@ class ServiceRequest extends Model
 
     protected $fillable = [
         'user_id',
+        'service_slot_id',
         'name',
         'phone',
         'email',
@@ -27,5 +28,10 @@ class ServiceRequest extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function serviceSlot()
+    {
+        return $this->belongsTo(ServiceSlot::class);
     }
 }

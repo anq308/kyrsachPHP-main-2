@@ -14,6 +14,7 @@ class StoreServiceRequestRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'service_slot_id' => 'nullable|exists:service_slots,id',
             'name' => 'required|string|max:255',
             'phone' => 'required|string|max:30',
             'email' => 'nullable|email|max:255',

@@ -3,9 +3,12 @@ export interface User {
   name: string;
   email: string;
   is_admin: boolean;
-  role: 'client' | 'manager' | 'admin';
+  role: 'client' | 'manager' | 'sales_manager' | 'service_manager' | 'warehouse_manager' | 'admin';
   is_manager: boolean;
   can_manage: boolean;
+  can_manage_sales?: boolean;
+  can_manage_service?: boolean;
+  can_manage_warehouse?: boolean;
   created_at?: string;
 }
 
@@ -107,6 +110,49 @@ export interface ClientNotification {
   created_at: string;
 }
 
+export interface AuditLog {
+  id: number;
+  user_id: number | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  description: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  ip_address: string | null;
+  user?: User | null;
+  created_at: string;
+}
+
+export interface StockMovement {
+  id: number;
+  motorcycle_id: number;
+  user_id: number | null;
+  type: 'receipt' | 'write_off' | 'reservation' | 'release' | 'correction';
+  quantity: number;
+  stock_before: number;
+  stock_after: number;
+  reserved_before: number;
+  reserved_after: number;
+  reason: string | null;
+  motorcycle?: Motorcycle | null;
+  user?: User | null;
+  created_at: string;
+}
+
+export interface ServiceSlot {
+  id: number;
+  service_date: string;
+  starts_at: string;
+  ends_at: string;
+  service_type: string | null;
+  capacity: number;
+  booked_count: number;
+  status: 'available' | 'booked' | 'closed';
+  comment: string | null;
+  created_at?: string;
+}
+
 export interface Order {
   id: number;
   user_id: number | null;
@@ -152,6 +198,7 @@ export type ServiceRequestStatus = 'new' | 'confirmed' | 'in_service' | 'done' |
 export interface ServiceRequest {
   id: number;
   user_id: number | null;
+  service_slot_id?: number | null;
   name: string;
   phone: string;
   email: string | null;
@@ -161,6 +208,7 @@ export interface ServiceRequest {
   comment: string | null;
   status: ServiceRequestStatus;
   user?: User | null;
+  service_slot?: ServiceSlot | null;
   created_at: string;
 }
 

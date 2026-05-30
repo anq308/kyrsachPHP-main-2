@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import api from '../api';
 import AlertMessage from '../components/ui/AlertMessage.vue';
 import PageHero from '../components/ui/PageHero.vue';
 import { sessionState } from '../session';
+import type { ServiceSlot } from '../types';
 
 const submitError = ref('');
 const submitSuccess = ref('');
 const submitting = ref(false);
+const serviceSlots = ref<ServiceSlot[]>([]);
 
 const serviceForm = reactive({
   name: sessionState.user?.name ?? '',
@@ -16,6 +18,7 @@ const serviceForm = reactive({
   email: sessionState.user?.email ?? '',
   motorcycle_model: '',
   service_type: 'Техническое обслуживание',
+  service_slot_id: '',
   preferred_date: '',
   comment: '',
 });
@@ -79,6 +82,22 @@ const processSteps = [
 
 const today = computed(() => new Date().toISOString().slice(0, 10));
 
+function slotLabel(slot: ServiceSlot): string {
+  const date = new Date(slot.service_date).toLocaleDateString('ru-RU');
+  const service = slot.service_type ? ` · ${slot.service_type}` : '';
+
+  return `${date}, ${slot.starts_at.slice(0, 5)}-${slot.ends_at.slice(0, 5)}${service} · свободно ${slot.capacity - slot.booked_count}`;
+}
+
+async function loadServiceSlots() {
+  try {
+    const { data } = await api.get('/service-slots');
+    serviceSlots.value = data.service_slots ?? [];
+  } catch {
+    serviceSlots.value = [];
+  }
+}
+
 async function submitServiceRequest() {
   submitError.value = '';
   submitSuccess.value = '';
@@ -87,6 +106,7 @@ async function submitServiceRequest() {
   try {
     const { data } = await api.post('/service-requests', {
       ...serviceForm,
+      service_slot_id: serviceForm.service_slot_id ? Number(serviceForm.service_slot_id) : null,
       preferred_date: serviceForm.preferred_date || null,
     });
 
@@ -94,14 +114,18 @@ async function submitServiceRequest() {
     serviceForm.phone = '';
     serviceForm.motorcycle_model = '';
     serviceForm.service_type = 'Техническое обслуживание';
+    serviceForm.service_slot_id = '';
     serviceForm.preferred_date = '';
     serviceForm.comment = '';
+    await loadServiceSlots();
   } catch (error: any) {
     submitError.value = error?.response?.data?.message ?? 'Не удалось отправить запись на сервис.';
   } finally {
     submitting.value = false;
   }
 }
+
+onMounted(loadServiceSlots);
 </script>
 
 <template>
@@ -180,6 +204,10 @@ async function submitServiceRequest() {
               <input v-model="serviceForm.motorcycle_model" type="text" required placeholder="Модель техники" class="field-dark" />
               <select v-model="serviceForm.service_type" required class="field-dark">
                 <option v-for="service in services" :key="service.title" :value="service.title">{{ service.title }}</option>
+              </select>
+              <select v-model="serviceForm.service_slot_id" class="field-dark">
+                <option value="">Время подберёт менеджер</option>
+                <option v-for="slot in serviceSlots" :key="slot.id" :value="String(slot.id)">{{ slotLabel(slot) }}</option>
               </select>
               <input v-model="serviceForm.preferred_date" type="date" :min="today" class="field-dark" />
               <textarea v-model="serviceForm.comment" rows="5" placeholder="Комментарий: пробег, симптомы, желаемые работы" class="field-dark md:col-span-2 resize-none" />

@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
 import { sessionState } from '../session';
-import type { ContactMessage, Motorcycle, Order, Payment, SalesRequest, ServiceRequest, StatusHistory, User } from '../types';
+import type { AuditLog, ContactMessage, Motorcycle, Order, Payment, SalesRequest, ServiceRequest, ServiceSlot, StatusHistory, StockMovement, User } from '../types';
 
 interface DashboardStats {
   usersCount: number;
@@ -38,7 +38,7 @@ interface DashboardAnalytics {
   salesConversion: number;
 }
 
-type AdminTab = 'dashboard' | 'orders' | 'payments' | 'warehouse' | 'sales' | 'service' | 'products' | 'users' | 'messages';
+type AdminTab = 'dashboard' | 'orders' | 'payments' | 'warehouse' | 'schedule' | 'sales' | 'service' | 'products' | 'users' | 'audit' | 'messages';
 type ProductGroupMode = 'type' | 'brand' | 'availability';
 
 const loading = ref(true);
@@ -59,6 +59,8 @@ const statusCommentModalOpen = ref(false);
 const statusCommentText = ref('');
 const statusCommentSaving = ref(false);
 const stockSavingId = ref<number | null>(null);
+const slotSaving = ref(false);
+const selectedCustomerId = ref<number | null>(null);
 const pendingStatusAction = ref<{
   title: string;
   subtitle: string;
@@ -69,6 +71,9 @@ const pendingStatusAction = ref<{
 const motorcycles = ref<Motorcycle[]>([]);
 const orders = ref<Order[]>([]);
 const payments = ref<Payment[]>([]);
+const serviceSlots = ref<ServiceSlot[]>([]);
+const stockMovements = ref<StockMovement[]>([]);
+const auditLogs = ref<AuditLog[]>([]);
 const salesRequests = ref<SalesRequest[]>([]);
 const serviceRequests = ref<ServiceRequest[]>([]);
 const users = ref<AdminUser[]>([]);
@@ -101,7 +106,17 @@ const analytics = ref<DashboardAnalytics>({
 });
 
 const editingId = ref<number | null>(null);
-const stockForms = reactive<Record<number, { stock_quantity: number; reserved_quantity: number }>>({});
+const stockForms = reactive<Record<number, { stock_quantity: number; reserved_quantity: number; reason: string }>>({});
+const slotForm = reactive({
+  service_date: new Date().toISOString().slice(0, 10),
+  starts_at: '10:00',
+  ends_at: '11:00',
+  service_type: '',
+  capacity: 1,
+  booked_count: 0,
+  status: 'available' as ServiceSlot['status'],
+  comment: '',
+});
 
 const form = reactive({
   brand: '',
@@ -128,10 +143,12 @@ const tabs: Array<{ id: AdminTab; label: string; hint: string }> = [
   { id: 'orders', label: 'Заказы', hint: 'Оплата, бронь, выдача' },
   { id: 'payments', label: 'Оплаты', hint: 'Статусы и транзакции' },
   { id: 'warehouse', label: 'Склад', hint: 'Остатки и резерв' },
+  { id: 'schedule', label: 'Расписание', hint: 'Сервисные слоты' },
   { id: 'sales', label: 'Покупка', hint: 'Заявки клиентов' },
   { id: 'service', label: 'Сервис', hint: 'Записи на обслуживание' },
   { id: 'products', label: 'Товары', hint: 'Склад и каталог' },
   { id: 'users', label: 'Клиенты', hint: 'Пользователи системы' },
+  { id: 'audit', label: 'Журнал', hint: 'Действия сотрудников' },
   { id: 'messages', label: 'Сообщения', hint: 'Обратная связь' },
 ];
 
@@ -186,7 +203,16 @@ const productGroupModes: Array<{ value: ProductGroupMode; label: string }> = [
 const roleOptions: Array<{ value: User['role']; label: string }> = [
   { value: 'client', label: 'Клиент' },
   { value: 'manager', label: 'Менеджер' },
+  { value: 'sales_manager', label: 'Менеджер продаж' },
+  { value: 'service_manager', label: 'Менеджер сервиса' },
+  { value: 'warehouse_manager', label: 'Кладовщик' },
   { value: 'admin', label: 'Администратор' },
+];
+
+const serviceSlotStatusOptions: Array<{ value: ServiceSlot['status']; label: string }> = [
+  { value: 'available', label: 'Доступен' },
+  { value: 'booked', label: 'Занят' },
+  { value: 'closed', label: 'Закрыт' },
 ];
 
 const activeTabMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
@@ -194,6 +220,7 @@ const urgentOrders = computed(() => orders.value.filter((order) => ['new', 'proc
 const readyOrders = computed(() => orders.value.filter((order) => order.status === 'ready_for_pickup'));
 const pendingPayments = computed(() => payments.value.filter((payment) => payment.status === 'pending'));
 const paidPayments = computed(() => payments.value.filter((payment) => payment.status === 'paid'));
+const availableServiceSlots = computed(() => serviceSlots.value.filter((slot) => slot.status === 'available'));
 const newSalesRequests = computed(() => salesRequests.value.filter((request) => request.status === 'new'));
 const newServiceRequests = computed(() => serviceRequests.value.filter((request) => request.status === 'new'));
 const unavailableMotorcycles = computed(() => motorcycles.value.filter((moto) => !moto.is_available));
@@ -240,6 +267,7 @@ const visibleMotorcycles = computed(() => {
 
 const productGroupCards = computed(() => groupMotorcycles(filteredMotorcycles.value));
 const groupedMotorcycles = computed(() => groupMotorcycles(visibleMotorcycles.value));
+const selectedCustomer = computed(() => users.value.find((client) => client.id === selectedCustomerId.value) ?? null);
 
 const filteredSalesRequests = computed(() =>
   salesRequests.value.filter((request) => salesStatusFilter.value === 'all' || request.status === salesStatusFilter.value),
@@ -255,10 +283,12 @@ function tabCount(tab: AdminTab): number {
     orders: orders.value.length,
     payments: payments.value.length,
     warehouse: lowStockMotorcycles.value.length,
+    schedule: availableServiceSlots.value.length,
     sales: salesRequests.value.length,
     service: serviceRequests.value.length,
     products: motorcycles.value.length,
     users: users.value.length,
+    audit: auditLogs.value.length,
     messages: messages.value.length,
   };
 
@@ -325,6 +355,38 @@ function paymentStatusLabel(status?: Order['payment_status']): string {
 
 function paymentOwner(payment: Payment): string {
   return payment.user?.name || payment.order?.user?.name || payment.order?.name || 'Гость';
+}
+
+function slotLabel(slot: ServiceSlot): string {
+  return `${new Date(slot.service_date).toLocaleDateString('ru-RU')} ${slot.starts_at.slice(0, 5)}-${slot.ends_at.slice(0, 5)}`;
+}
+
+function auditEntityLabel(log: AuditLog): string {
+  if (!log.entity_type || !log.entity_id) {
+    return 'Система';
+  }
+
+  if (log.entity_type.includes('Order')) {
+    return `Заказ #${log.entity_id}`;
+  }
+
+  if (log.entity_type.includes('Payment')) {
+    return `Оплата #${log.entity_id}`;
+  }
+
+  if (log.entity_type.includes('Motorcycle')) {
+    return `Товар #${log.entity_id}`;
+  }
+
+  if (log.entity_type.includes('ServiceSlot')) {
+    return `Слот #${log.entity_id}`;
+  }
+
+  if (log.entity_type.includes('User')) {
+    return `Пользователь #${log.entity_id}`;
+  }
+
+  return `Запись #${log.entity_id}`;
 }
 
 function orderLabel(payment: Payment): string {
@@ -487,6 +549,7 @@ function syncStockForms() {
     stockForms[moto.id] = {
       stock_quantity: Number(moto.stock_quantity ?? 0),
       reserved_quantity: Number(moto.reserved_quantity ?? 0),
+      reason: stockForms[moto.id]?.reason ?? '',
     };
   });
 }
@@ -500,6 +563,9 @@ async function loadDashboard() {
     motorcycles.value = data.motorcycles ?? [];
     orders.value = data.orders ?? [];
     payments.value = data.payments ?? [];
+    serviceSlots.value = data.service_slots ?? [];
+    stockMovements.value = data.stock_movements ?? [];
+    auditLogs.value = data.audit_logs ?? [];
     salesRequests.value = data.sales_requests ?? [];
     serviceRequests.value = data.service_requests ?? [];
     users.value = data.users ?? [];
@@ -512,6 +578,47 @@ async function loadDashboard() {
     errorText.value = 'Не удалось загрузить данные админ-панели.';
   } finally {
     loading.value = false;
+  }
+}
+
+async function saveServiceSlot() {
+  slotSaving.value = true;
+  errorText.value = '';
+  successText.value = '';
+
+  try {
+    const { data } = await api.post('/admin/service-slots', {
+      ...slotForm,
+      service_type: slotForm.service_type || null,
+      comment: slotForm.comment || null,
+    });
+    successText.value = data.message;
+    slotForm.booked_count = 0;
+    slotForm.comment = '';
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось сохранить слот сервиса.';
+  } finally {
+    slotSaving.value = false;
+  }
+}
+
+async function updateServiceSlotStatus(slot: ServiceSlot, status: ServiceSlot['status']) {
+  try {
+    const { data } = await api.patch(`/admin/service-slots/${slot.id}`, {
+      service_date: slot.service_date.slice(0, 10),
+      starts_at: slot.starts_at.slice(0, 5),
+      ends_at: slot.ends_at.slice(0, 5),
+      service_type: slot.service_type,
+      capacity: slot.capacity,
+      booked_count: slot.booked_count,
+      status,
+      comment: slot.comment,
+    });
+    successText.value = data.message;
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось обновить слот сервиса.';
   }
 }
 
@@ -584,7 +691,10 @@ async function saveStock(moto: Motorcycle) {
   successText.value = '';
 
   try {
-    const { data } = await api.patch(`/admin/motorcycles/${moto.id}/stock`, payload);
+    const { data } = await api.patch(`/admin/motorcycles/${moto.id}/stock`, {
+      ...payload,
+      reason: payload.reason || null,
+    });
     successText.value = data.message;
     await loadDashboard();
   } catch (error: any) {
@@ -1115,6 +1225,7 @@ onMounted(loadDashboard);
                       <th>Модель</th>
                       <th>Склад</th>
                       <th>Резерв</th>
+                      <th class="hidden lg:table-cell">Причина</th>
                       <th>Доступно</th>
                       <th class="text-right">Сохранить</th>
                     </tr>
@@ -1136,6 +1247,9 @@ onMounted(loadDashboard);
                       <td>
                         <input v-if="stockForms[motorcycle.id]" v-model.number="stockForms[motorcycle.id].reserved_quantity" type="number" min="0" class="field-dark w-28" />
                       </td>
+                      <td class="hidden lg:table-cell">
+                        <input v-if="stockForms[motorcycle.id]" v-model="stockForms[motorcycle.id].reason" type="text" class="field-dark min-w-56" placeholder="Приход, списание, инвентаризация..." />
+                      </td>
                       <td>
                         <div class="flex flex-col gap-1">
                           <span class="text-white font-display font-bold text-lg">{{ availableStock(motorcycle) }}</span>
@@ -1151,6 +1265,82 @@ onMounted(loadDashboard);
                   </tbody>
                 </table>
               </div>
+            </section>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="px-5 py-4 border-b border-white/5">
+                <h3 class="text-xl font-display font-bold text-white uppercase">История движения склада</h3>
+                <p class="text-gray-500 text-sm mt-1">Кто и почему менял остатки по товарам.</p>
+              </div>
+              <div class="divide-y divide-white/5">
+                <article v-for="movement in stockMovements.slice(0, 10)" :key="movement.id" class="p-4 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+                  <div>
+                    <p class="text-white font-bold">{{ movement.motorcycle ? `${movement.motorcycle.brand} ${movement.motorcycle.model}` : `Товар #${movement.motorcycle_id}` }}</p>
+                    <p class="text-gray-500 text-sm">Склад {{ movement.stock_before }} → {{ movement.stock_after }} · резерв {{ movement.reserved_before }} → {{ movement.reserved_after }}</p>
+                    <p v-if="movement.reason" class="text-gray-600 text-sm mt-1">{{ movement.reason }}</p>
+                  </div>
+                  <p class="text-gray-600 text-xs lg:text-right">{{ movement.user?.name || 'Система' }}<br />{{ formatDate(movement.created_at) }}</p>
+                </article>
+                <div v-if="!stockMovements.length" class="empty-panel">Движений склада пока нет.</div>
+              </div>
+            </section>
+          </section>
+
+          <section v-show="activeTab === 'schedule'" class="space-y-5">
+            <form class="bg-dark-lighter border border-white/5 p-5" @submit.prevent="saveServiceSlot">
+              <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
+                <div>
+                  <h3 class="text-xl font-display font-bold text-white uppercase">Новый слот сервиса</h3>
+                  <p class="text-gray-500 text-sm">Создайте доступное время для записи клиента.</p>
+                </div>
+                <button type="submit" class="btn btn-primary" :disabled="slotSaving"><span>{{ slotSaving ? 'Сохранение...' : 'Добавить слот' }}</span></button>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <input v-model="slotForm.service_date" type="date" class="field-dark" required />
+                <input v-model="slotForm.starts_at" type="time" class="field-dark" required />
+                <input v-model="slotForm.ends_at" type="time" class="field-dark" required />
+                <input v-model.number="slotForm.capacity" type="number" min="1" class="field-dark" placeholder="Мест" required />
+                <input v-model="slotForm.service_type" class="field-dark md:col-span-2" placeholder="Тип услуги, можно оставить пустым" />
+                <select v-model="slotForm.status" class="field-dark">
+                  <option v-for="option in serviceSlotStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+                <input v-model="slotForm.comment" class="field-dark" placeholder="Комментарий" />
+              </div>
+            </form>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="px-5 py-4 border-b border-white/5">
+                <h3 class="text-xl font-display font-bold text-white uppercase">Расписание сервиса</h3>
+                <p class="text-gray-500 text-sm mt-1">Слоты, занятость и доступность записи.</p>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Дата и время</th>
+                      <th>Услуга</th>
+                      <th>Занятость</th>
+                      <th>Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="slot in serviceSlots" :key="slot.id">
+                      <td>
+                        <p class="text-white font-display font-bold uppercase">{{ slotLabel(slot) }}</p>
+                        <p class="text-gray-600 text-xs">{{ slot.comment || 'без комментария' }}</p>
+                      </td>
+                      <td><span class="text-gray-300 text-sm">{{ slot.service_type || 'Любая услуга' }}</span></td>
+                      <td><span class="text-primary font-display font-bold text-lg">{{ slot.booked_count }} / {{ slot.capacity }}</span></td>
+                      <td>
+                        <select class="field-dark min-w-40" :value="slot.status" @change="updateServiceSlotStatus(slot, ($event.target as HTMLSelectElement).value as ServiceSlot['status'])">
+                          <option v-for="option in serviceSlotStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                        </select>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="!serviceSlots.length" class="empty-panel">Слоты сервиса пока не созданы.</div>
             </section>
           </section>
 
@@ -1209,6 +1399,7 @@ onMounted(loadDashboard);
                 <p class="text-gray-300 font-medium">{{ request.motorcycle_model }}</p>
                 <p class="text-gray-500 text-sm mt-1">{{ request.name }} · {{ request.phone }} · {{ request.email || 'email не указан' }}</p>
                 <p class="text-gray-500 text-sm mt-2">Желаемая дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
+                <p v-if="request.service_slot" class="text-gray-500 text-sm mt-2">Слот: {{ slotLabel(request.service_slot) }}</p>
                 <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
                 <div class="flex gap-2 mt-5">
                   <select class="field-dark flex-1" :value="request.status" @change="requestServiceStatusUpdate(request, $event.target as HTMLSelectElement)">
@@ -1384,48 +1575,101 @@ onMounted(loadDashboard);
             <div v-if="!visibleMotorcycles.length" class="empty-panel">Товаров по выбранным условиям не найдено.</div>
           </section>
 
-          <section v-show="activeTab === 'users'" class="bg-dark-lighter border border-white/5 overflow-hidden">
-            <div class="overflow-x-auto">
-              <table class="admin-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Пользователь</th>
-                    <th class="hidden md:table-cell">Email</th>
-                    <th class="hidden md:table-cell">Активность</th>
-                    <th class="hidden md:table-cell">Роль</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="client in users" :key="client.id">
-                    <td><span class="text-gray-600 text-sm font-display font-bold">#{{ client.id }}</span></td>
-                    <td>
-                      <div class="flex items-center gap-3">
-                        <div class="w-9 h-9 flex items-center justify-center text-sm font-display font-bold" :class="client.can_manage ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-white/5 text-gray-400 border border-white/10'">
-                          {{ client.name.trim().charAt(0).toUpperCase() }}
+          <section v-show="activeTab === 'users'" class="space-y-5">
+            <section v-if="selectedCustomer" class="bg-dark-lighter border border-primary/30 p-5">
+              <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <p class="text-primary text-xs font-bold uppercase tracking-[0.24em] mb-2">Карточка клиента</p>
+                  <h3 class="text-2xl font-display font-bold text-white uppercase">{{ selectedCustomer.name }}</h3>
+                  <p class="text-gray-500 text-sm">{{ selectedCustomer.email }}</p>
+                </div>
+                <button type="button" class="filter-chip" @click="selectedCustomerId = null">Закрыть</button>
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+                <div class="bg-dark border border-white/5 p-4">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Заказы</p>
+                  <p class="text-white font-display font-bold text-2xl">{{ selectedCustomer.orders?.length ?? 0 }}</p>
+                </div>
+                <div class="bg-dark border border-white/5 p-4">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Заявки</p>
+                  <p class="text-primary font-display font-bold text-2xl">{{ selectedCustomer.sales_requests?.length ?? 0 }}</p>
+                </div>
+                <div class="bg-dark border border-white/5 p-4">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Сервис</p>
+                  <p class="text-green-300 font-display font-bold text-2xl">{{ selectedCustomer.service_requests?.length ?? 0 }}</p>
+                </div>
+                <div class="bg-dark border border-white/5 p-4">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Роль</p>
+                  <StatusBadge :status="selectedCustomer.role" kind="role" />
+                </div>
+              </div>
+            </section>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Пользователь</th>
+                      <th class="hidden md:table-cell">Email</th>
+                      <th class="hidden md:table-cell">Активность</th>
+                      <th class="hidden md:table-cell">Роль</th>
+                      <th class="text-right">Карточка</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="client in users" :key="client.id">
+                      <td><span class="text-gray-600 text-sm font-display font-bold">#{{ client.id }}</span></td>
+                      <td>
+                        <div class="flex items-center gap-3">
+                          <div class="w-9 h-9 flex items-center justify-center text-sm font-display font-bold" :class="client.can_manage ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-white/5 text-gray-400 border border-white/10'">
+                            {{ client.name.trim().charAt(0).toUpperCase() }}
+                          </div>
+                          <span class="text-white font-medium text-sm">{{ client.name }}</span>
                         </div>
-                        <span class="text-white font-medium text-sm">{{ client.name }}</span>
-                      </div>
-                    </td>
-                    <td class="hidden md:table-cell"><span class="text-gray-400 text-sm">{{ client.email }}</span></td>
-                    <td class="hidden md:table-cell">
-                      <span class="text-gray-500 text-sm">{{ client.orders?.length ?? 0 }} заказов · {{ client.sales_requests?.length ?? 0 }} заявок · {{ client.service_requests?.length ?? 0 }} сервис</span>
-                    </td>
-                    <td class="hidden md:table-cell">
-                      <select
-                        v-if="canEditRoles"
-                        class="field-dark min-w-44"
-                        :value="client.role"
-                        :disabled="client.id === sessionState.user?.id"
-                        @change="updateUserRole(client.id, ($event.target as HTMLSelectElement).value as User['role'])"
-                      >
-                        <option v-for="option in roleOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                      </select>
-                      <StatusBadge v-else :status="client.role" kind="role" />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                      </td>
+                      <td class="hidden md:table-cell"><span class="text-gray-400 text-sm">{{ client.email }}</span></td>
+                      <td class="hidden md:table-cell">
+                        <span class="text-gray-500 text-sm">{{ client.orders?.length ?? 0 }} заказов · {{ client.sales_requests?.length ?? 0 }} заявок · {{ client.service_requests?.length ?? 0 }} сервис</span>
+                      </td>
+                      <td class="hidden md:table-cell">
+                        <select
+                          v-if="canEditRoles"
+                          class="field-dark min-w-44"
+                          :value="client.role"
+                          :disabled="client.id === sessionState.user?.id"
+                          @change="updateUserRole(client.id, ($event.target as HTMLSelectElement).value as User['role'])"
+                        >
+                          <option v-for="option in roleOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                        </select>
+                        <StatusBadge v-else :status="client.role" kind="role" />
+                      </td>
+                      <td class="text-right">
+                        <button type="button" class="filter-chip" @click="selectedCustomerId = client.id">Открыть</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section v-show="activeTab === 'audit'" class="bg-dark-lighter border border-white/5 overflow-hidden">
+            <div class="px-5 py-4 border-b border-white/5">
+              <h3 class="text-xl font-display font-bold text-white uppercase">Журнал действий</h3>
+              <p class="text-gray-500 text-sm mt-1">Аудит важных действий сотрудников: роли, оплаты, склад, статусы и расписание.</p>
+            </div>
+            <div class="divide-y divide-white/5">
+              <article v-for="log in auditLogs" :key="log.id" class="p-4 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+                <div>
+                  <p class="text-white font-bold">{{ log.description || log.action }}</p>
+                  <p class="text-gray-500 text-sm">{{ auditEntityLabel(log) }} · {{ log.user?.name || 'Система' }}</p>
+                  <p class="text-gray-600 text-xs mt-1">{{ log.action }}</p>
+                </div>
+                <p class="text-gray-600 text-xs lg:text-right">{{ formatDate(log.created_at) }}</p>
+              </article>
+              <div v-if="!auditLogs.length" class="empty-panel">Действий пока нет.</div>
             </div>
           </section>
 

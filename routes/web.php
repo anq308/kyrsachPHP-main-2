@@ -9,6 +9,7 @@ Route::prefix('api')->group(function () {
     Route::get('/home', [SpaApiController::class, 'home']);
     Route::get('/catalog', [SpaApiController::class, 'catalog']);
     Route::get('/pickup-points', [SpaApiController::class, 'pickupPoints']);
+    Route::get('/service-slots', [SpaApiController::class, 'serviceSlots']);
     Route::get('/motorcycles/{id}', [SpaApiController::class, 'motorcycle']);
 
     Route::get('/cart', [SpaApiController::class, 'cartIndex']);
@@ -45,8 +46,14 @@ Route::prefix('api')->group(function () {
 
     Route::middleware(['auth', 'is_admin'])->prefix('admin')->group(function () {
         Route::get('/dashboard', [SpaApiController::class, 'adminDashboard']);
+        Route::get('/audit-logs', [SpaApiController::class, 'adminAuditLogsIndex']);
+        Route::get('/customers/{id}', [SpaApiController::class, 'adminCustomerShow']);
         Route::get('/orders', [SpaApiController::class, 'adminOrdersIndex']);
         Route::get('/payments', [SpaApiController::class, 'adminPaymentsIndex']);
+        Route::get('/stock-movements', [SpaApiController::class, 'adminStockMovementsIndex']);
+        Route::post('/service-slots', [SpaApiController::class, 'adminStoreServiceSlot']);
+        Route::patch('/service-slots/{id}', [SpaApiController::class, 'adminUpdateServiceSlot']);
+        Route::delete('/service-slots/{id}', [SpaApiController::class, 'adminDeleteServiceSlot']);
         Route::post('/motorcycles', [SpaApiController::class, 'adminStoreMotorcycle']);
         Route::put('/motorcycles/{id}', [SpaApiController::class, 'adminUpdateMotorcycle']);
         Route::patch('/motorcycles/{id}/stock', [SpaApiController::class, 'adminUpdateMotorcycleStock']);

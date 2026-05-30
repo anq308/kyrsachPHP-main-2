@@ -21,9 +21,12 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PickupPoint;
 use App\Models\SalesRequest;
+use App\Models\ServiceSlot;
 use App\Models\ServiceRequest;
+use App\Models\StockMovement;
 use App\Models\User;
 use App\Services\AdminDashboardService;
+use App\Services\AuditLogService;
 use App\Services\CartService;
 use App\Services\ClientNotificationService;
 use App\Services\OrderLifecycleService;
@@ -44,7 +47,8 @@ class SpaApiController extends Controller
         private OrderService $orderService,
         private OrderLifecycleService $orderLifecycleService,
         private ClientNotificationService $notificationService,
-        private StatusHistoryService $statusHistoryService
+        private StatusHistoryService $statusHistoryService,
+        private AuditLogService $auditLogService
     ) {}
 
     public function bootstrap(Request $request): JsonResponse
@@ -187,6 +191,19 @@ class SpaApiController extends Controller
             'pickup_points' => PickupPoint::where('is_active', true)
                 ->orderBy('name')
                 ->get(),
+        ]);
+    }
+
+    public function serviceSlots(): JsonResponse
+    {
+        return response()->json([
+            'service_slots' => ServiceSlot::where('status', 'available')
+                ->whereDate('service_date', '>=', now()->toDateString())
+                ->orderBy('service_date')
+                ->orderBy('starts_at')
+                ->get()
+                ->filter(fn (ServiceSlot $slot) => $slot->hasFreeCapacity())
+                ->values(),
         ]);
     }
 
@@ -344,15 +361,29 @@ class SpaApiController extends Controller
     public function storeServiceRequest(StoreServiceRequestRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        $slot = null;
+
+        if (! empty($validated['service_slot_id'])) {
+            $slot = ServiceSlot::findOrFail($validated['service_slot_id']);
+
+            if (! $slot->hasFreeCapacity()) {
+                throw ValidationException::withMessages([
+                    'service_slot_id' => 'Выбранное время сервиса уже занято.',
+                ]);
+            }
+
+            $validated['preferred_date'] = $validated['preferred_date'] ?? $slot->service_date;
+        }
 
         $validated['status'] = 'new';
         $validated['user_id'] = Auth::id();
 
         $serviceRequest = ServiceRequest::create($validated);
+        $slot?->increment('booked_count');
 
         return response()->json([
             'message' => 'Заявка на сервисное обслуживание отправлена. Менеджер свяжется с вами для подтверждения записи.',
-            'service_request' => $serviceRequest,
+            'service_request' => $serviceRequest->load('serviceSlot'),
         ], 201);
     }
 
@@ -360,6 +391,7 @@ class SpaApiController extends Controller
     {
         $serviceRequests = $request->user()
             ->serviceRequests()
+            ->with('serviceSlot')
             ->latest()
             ->get();
 
@@ -370,7 +402,7 @@ class SpaApiController extends Controller
 
     public function adminServiceRequestsIndex(Request $request): JsonResponse
     {
-        $query = ServiceRequest::with('user')->latest();
+        $query = ServiceRequest::with(['user', 'serviceSlot'])->latest();
 
         if ($request->filled('status') && in_array($request->input('status'), ServiceRequest::STATUSES, true)) {
             $query->where('status', $request->input('status'));
@@ -514,7 +546,7 @@ class SpaApiController extends Controller
             ->latest()
             ->get();
         $salesRequests = $user->salesRequests()->with('motorcycle')->latest()->get();
-        $serviceRequests = $user->serviceRequests()->latest()->get();
+        $serviceRequests = $user->serviceRequests()->with('serviceSlot')->latest()->get();
         $notifications = $user->clientNotifications()->latest()->take(20)->get();
 
         return response()->json([
@@ -576,6 +608,70 @@ class SpaApiController extends Controller
         ]);
     }
 
+    public function adminAuditLogsIndex(Request $request): JsonResponse
+    {
+        $query = \App\Models\AuditLog::with('user')->latest();
+
+        if ($request->filled('action')) {
+            $query->where('action', $request->string('action')->toString());
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(function ($q) use ($search) {
+                $q->where('action', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%")
+                    ->orWhereHas('user', function ($userQuery) use ($search) {
+                        $userQuery->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        return response()->json([
+            'audit_logs' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
+    public function adminCustomerShow(string $id): JsonResponse
+    {
+        $customer = User::with([
+            'orders.items',
+            'orders.payments',
+            'orders.pickupPoint',
+            'salesRequests.motorcycle',
+            'serviceRequests.serviceSlot',
+            'payments',
+            'clientNotifications',
+        ])->findOrFail($id);
+
+        return response()->json([
+            'customer' => $this->userPayload($customer),
+            'orders' => $customer->orders->sortByDesc('created_at')->values(),
+            'sales_requests' => $customer->salesRequests->sortByDesc('created_at')->values(),
+            'service_requests' => $customer->serviceRequests->sortByDesc('created_at')->values(),
+            'payments' => $customer->payments->sortByDesc('created_at')->values(),
+            'notifications' => $customer->clientNotifications->sortByDesc('created_at')->values(),
+        ]);
+    }
+
+    public function adminStockMovementsIndex(Request $request): JsonResponse
+    {
+        $query = StockMovement::with(['motorcycle', 'user'])->latest();
+
+        if ($request->filled('type') && in_array($request->input('type'), StockMovement::TYPES, true)) {
+            $query->where('type', $request->input('type'));
+        }
+
+        if ($request->filled('motorcycle_id')) {
+            $query->where('motorcycle_id', (int) $request->input('motorcycle_id'));
+        }
+
+        return response()->json([
+            'stock_movements' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
     public function adminPaymentsIndex(Request $request): JsonResponse
     {
         $query = Payment::with(['order.user', 'user'])->latest();
@@ -608,6 +704,58 @@ class SpaApiController extends Controller
 
         return response()->json([
             'payments' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
+    public function adminStoreServiceSlot(Request $request): JsonResponse
+    {
+        $validated = $this->validateServiceSlot($request);
+        $slot = ServiceSlot::create($validated);
+        $this->auditLogService->record('service_slot_created', $slot, $request->user(), 'Создан слот записи на сервис.', null, $slot->toArray());
+
+        return response()->json([
+            'message' => 'Слот сервиса создан.',
+            'service_slot' => $slot,
+        ], 201);
+    }
+
+    public function adminUpdateServiceSlot(Request $request, string $id): JsonResponse
+    {
+        $slot = ServiceSlot::findOrFail($id);
+        $before = $slot->only(['service_date', 'starts_at', 'ends_at', 'service_type', 'capacity', 'booked_count', 'status', 'comment']);
+        $validated = $this->validateServiceSlot($request);
+
+        if (($validated['booked_count'] ?? 0) > ($validated['capacity'] ?? 1)) {
+            throw ValidationException::withMessages([
+                'booked_count' => 'Количество записей не может быть больше вместимости слота.',
+            ]);
+        }
+
+        $slot->update($validated);
+        $this->auditLogService->record('service_slot_updated', $slot, $request->user(), 'Обновлён слот записи на сервис.', $before, $slot->fresh()->toArray());
+
+        return response()->json([
+            'message' => 'Слот сервиса обновлён.',
+            'service_slot' => $slot->fresh(),
+        ]);
+    }
+
+    public function adminDeleteServiceSlot(Request $request, string $id): JsonResponse
+    {
+        $slot = ServiceSlot::findOrFail($id);
+
+        if ($slot->serviceRequests()->exists()) {
+            return response()->json([
+                'message' => 'Нельзя удалить слот, к которому уже привязаны сервисные заявки.',
+            ], 422);
+        }
+
+        $before = $slot->toArray();
+        $slot->delete();
+        $this->auditLogService->record('service_slot_deleted', null, $request->user(), 'Удалён слот записи на сервис.', $before);
+
+        return response()->json([
+            'message' => 'Слот сервиса удалён.',
         ]);
     }
 
@@ -670,6 +818,7 @@ class SpaApiController extends Controller
         $validated = $request->validate([
             'stock_quantity' => ['required', 'integer', 'min:0'],
             'reserved_quantity' => ['required', 'integer', 'min:0'],
+            'reason' => ['nullable', 'string', 'max:1000'],
         ]);
 
         if ($validated['reserved_quantity'] > $validated['stock_quantity']) {
@@ -679,12 +828,31 @@ class SpaApiController extends Controller
         }
 
         $motorcycle = Motorcycle::findOrFail($id);
-        $motorcycle->update($validated);
+        $before = $motorcycle->only(['stock_quantity', 'reserved_quantity', 'is_available']);
+        $motorcycle->update([
+            'stock_quantity' => $validated['stock_quantity'],
+            'reserved_quantity' => $validated['reserved_quantity'],
+        ]);
         $motorcycle->refreshAvailability();
+        $motorcycle->refresh();
+        $quantityDelta = (int) $motorcycle->stock_quantity - (int) $before['stock_quantity'];
+
+        StockMovement::create([
+            'motorcycle_id' => $motorcycle->id,
+            'user_id' => $request->user()?->id,
+            'type' => 'correction',
+            'quantity' => $quantityDelta,
+            'stock_before' => (int) $before['stock_quantity'],
+            'stock_after' => (int) $motorcycle->stock_quantity,
+            'reserved_before' => (int) $before['reserved_quantity'],
+            'reserved_after' => (int) $motorcycle->reserved_quantity,
+            'reason' => $validated['reason'] ?? 'Ручная корректировка склада',
+        ]);
+        $this->auditLogService->record('stock_updated', $motorcycle, $request->user(), 'Изменён складской остаток товара.', $before, $motorcycle->only(['stock_quantity', 'reserved_quantity', 'is_available']));
 
         return response()->json([
             'message' => 'Складской остаток обновлён.',
-            'motorcycle' => $motorcycle->fresh(),
+            'motorcycle' => $motorcycle,
         ]);
     }
 
@@ -701,6 +869,7 @@ class SpaApiController extends Controller
     public function adminUpdateOrderStatus(UpdateOrderStatusRequest $request, string $id): JsonResponse
     {
         $order = Order::findOrFail($id);
+        $oldStatus = $order->status;
         $order = $this->orderLifecycleService->updateStatus(
             $order,
             $request->input('status'),
@@ -708,6 +877,7 @@ class SpaApiController extends Controller
             $request->input('pickup_ready_at'),
             $request->input('status_comment')
         );
+        $this->auditLogService->record('order_status_updated', $order, $request->user(), 'Изменён статус заказа.', ['status' => $oldStatus], ['status' => $order->status]);
 
         return response()->json([
             'message' => 'Статус заказа #'.$order->id.' обновлён.',
@@ -723,6 +893,7 @@ class SpaApiController extends Controller
         ]);
 
         $payment = Payment::with(['order', 'user'])->findOrFail($id);
+        $before = $payment->only(['status', 'transaction_id', 'paid_at']);
         $oldStatus = $payment->status;
         $status = $validated['status'];
 
@@ -741,6 +912,8 @@ class SpaApiController extends Controller
         if ($oldStatus !== $status && $payment->order) {
             $this->notifyPaymentCustomer($payment, $oldStatus);
         }
+        $payment->refresh();
+        $this->auditLogService->record('payment_status_updated', $payment, $request->user(), 'Изменён статус оплаты.', $before, $payment->only(['status', 'transaction_id', 'paid_at']));
 
         return response()->json([
             'message' => 'Статус оплаты #'.$payment->id.' обновлён.',
@@ -754,6 +927,7 @@ class SpaApiController extends Controller
         $oldStatus = $salesRequest->status;
         $salesRequest->update(['status' => $request->input('status')]);
         $this->statusHistoryService->record($salesRequest, $oldStatus, $salesRequest->status, $request->user(), $request->input('status_comment'));
+        $this->auditLogService->record('sales_request_status_updated', $salesRequest, $request->user(), 'Изменён статус заявки на покупку.', ['status' => $oldStatus], ['status' => $salesRequest->status]);
         $salesRequest->load(['user', 'motorcycle']);
         $this->notifySalesRequestCustomer($salesRequest, $oldStatus);
 
@@ -779,7 +953,8 @@ class SpaApiController extends Controller
         $oldStatus = $serviceRequest->status;
         $serviceRequest->update(['status' => $request->input('status')]);
         $this->statusHistoryService->record($serviceRequest, $oldStatus, $serviceRequest->status, $request->user(), $request->input('status_comment'));
-        $serviceRequest->load('user');
+        $this->auditLogService->record('service_request_status_updated', $serviceRequest, $request->user(), 'Изменён статус сервисной заявки.', ['status' => $oldStatus], ['status' => $serviceRequest->status]);
+        $serviceRequest->load(['user', 'serviceSlot']);
         $this->notifyServiceRequestCustomer($serviceRequest, $oldStatus);
 
         return response()->json([
@@ -808,9 +983,11 @@ class SpaApiController extends Controller
             ], 422);
         }
 
+        $before = $user->only(['role', 'is_admin']);
         $user->update([
             'role' => $request->input('role'),
         ]);
+        $this->auditLogService->record('user_role_updated', $user, $request->user(), 'Изменена роль пользователя.', $before, $user->fresh()->only(['role', 'is_admin']));
 
         return response()->json([
             'message' => 'Роль пользователя обновлена.',
@@ -832,8 +1009,25 @@ class SpaApiController extends Controller
             'role' => $user->role,
             'is_manager' => $user->isManager(),
             'can_manage' => $user->canManagePanel(),
+            'can_manage_sales' => $user->canManageSales(),
+            'can_manage_service' => $user->canManageService(),
+            'can_manage_warehouse' => $user->canManageWarehouse(),
             'created_at' => optional($user->created_at)?->toISOString(),
         ];
+    }
+
+    private function validateServiceSlot(Request $request): array
+    {
+        return $request->validate([
+            'service_date' => ['required', 'date'],
+            'starts_at' => ['required', 'date_format:H:i'],
+            'ends_at' => ['required', 'date_format:H:i', 'after:starts_at'],
+            'service_type' => ['nullable', 'string', 'max:255'],
+            'capacity' => ['required', 'integer', 'min:1', 'max:20'],
+            'booked_count' => ['nullable', 'integer', 'min:0'],
+            'status' => ['required', 'in:'.implode(',', ServiceSlot::STATUSES)],
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
     }
 
     private function notifySalesRequestCustomer(SalesRequest $salesRequest, ?string $oldStatus): void

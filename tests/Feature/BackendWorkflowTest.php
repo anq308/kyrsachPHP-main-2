@@ -8,7 +8,9 @@ use App\Models\Payment;
 use App\Models\PickupPoint;
 use App\Models\Reservation;
 use App\Models\SalesRequest;
+use App\Models\ServiceSlot;
 use App\Models\ServiceRequest;
+use App\Models\StockMovement;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -41,7 +43,18 @@ class BackendWorkflowTest extends TestCase
 
     public function test_customer_can_create_service_request(): void
     {
+        $slot = ServiceSlot::create([
+            'service_date' => now()->addDay()->toDateString(),
+            'starts_at' => '10:00',
+            'ends_at' => '11:00',
+            'service_type' => 'Диагностика',
+            'capacity' => 1,
+            'booked_count' => 0,
+            'status' => 'available',
+        ]);
+
         $this->postJson('/api/service-requests', [
+            'service_slot_id' => $slot->id,
             'name' => 'Петр',
             'phone' => '+79991112233',
             'email' => 'service@example.com',
@@ -55,8 +68,10 @@ class BackendWorkflowTest extends TestCase
         $this->assertDatabaseHas('service_requests', [
             'motorcycle_model' => 'AVANTIS Enduro 250',
             'service_type' => 'Диагностика',
+            'service_slot_id' => $slot->id,
             'status' => 'new',
         ]);
+        $this->assertSame(1, $slot->fresh()->booked_count);
     }
 
     public function test_non_admin_receives_json_forbidden_for_admin_api(): void
@@ -71,11 +86,13 @@ class BackendWorkflowTest extends TestCase
 
     public function test_manager_can_access_staff_dashboard(): void
     {
-        $manager = User::factory()->create(['role' => User::ROLE_MANAGER]);
+        foreach ([User::ROLE_MANAGER, User::ROLE_SALES_MANAGER, User::ROLE_SERVICE_MANAGER, User::ROLE_WAREHOUSE_MANAGER] as $role) {
+            $manager = User::factory()->create(['role' => $role]);
 
-        $this->actingAs($manager)
-            ->getJson('/api/admin/dashboard')
-            ->assertOk();
+            $this->actingAs($manager)
+                ->getJson('/api/admin/dashboard')
+                ->assertOk();
+        }
     }
 
     public function test_admin_can_assign_user_roles(): void
@@ -428,6 +445,10 @@ class BackendWorkflowTest extends TestCase
             'type' => 'payment',
             'is_read' => false,
         ]);
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $admin->id,
+            'action' => 'payment_status_updated',
+        ]);
     }
 
     public function test_admin_can_update_motorcycle_stock(): void
@@ -443,11 +464,23 @@ class BackendWorkflowTest extends TestCase
             ->patchJson("/api/admin/motorcycles/{$motorcycle->id}/stock", [
                 'stock_quantity' => 5,
                 'reserved_quantity' => 2,
+                'reason' => 'Приход техники после поставки.',
             ])
             ->assertOk()
             ->assertJsonPath('motorcycle.stock_quantity', 5)
             ->assertJsonPath('motorcycle.reserved_quantity', 2)
             ->assertJsonPath('motorcycle.is_available', true);
+
+        $this->assertDatabaseHas('stock_movements', [
+            'motorcycle_id' => $motorcycle->id,
+            'user_id' => $admin->id,
+            'type' => 'correction',
+            'stock_before' => 0,
+            'stock_after' => 5,
+            'reserved_before' => 0,
+            'reserved_after' => 2,
+            'reason' => 'Приход техники после поставки.',
+        ]);
 
         $this->actingAs($admin)
             ->patchJson("/api/admin/motorcycles/{$motorcycle->id}/stock", [
@@ -456,6 +489,43 @@ class BackendWorkflowTest extends TestCase
             ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('reserved_quantity');
+    }
+
+    public function test_admin_can_create_service_slot_and_customer_card(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $customer = User::factory()->create(['name' => 'Клиент карточки']);
+        ServiceRequest::create([
+            'user_id' => $customer->id,
+            'name' => $customer->name,
+            'phone' => '+79990000402',
+            'motorcycle_model' => 'AVANTIS Enduro 250',
+            'service_type' => 'Диагностика',
+            'status' => 'new',
+        ]);
+
+        $this->actingAs($admin)
+            ->postJson('/api/admin/service-slots', [
+                'service_date' => now()->addDays(2)->toDateString(),
+                'starts_at' => '12:00',
+                'ends_at' => '13:00',
+                'service_type' => 'Диагностика',
+                'capacity' => 2,
+                'status' => 'available',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('service_slot.capacity', 2);
+
+        $this->actingAs($admin)
+            ->getJson("/api/admin/customers/{$customer->id}")
+            ->assertOk()
+            ->assertJsonPath('customer.name', 'Клиент карточки')
+            ->assertJsonCount(1, 'service_requests');
+
+        $this->assertDatabaseHas('audit_logs', [
+            'user_id' => $admin->id,
+            'action' => 'service_slot_created',
+        ]);
     }
 
     public function test_admin_can_filter_users_by_role(): void

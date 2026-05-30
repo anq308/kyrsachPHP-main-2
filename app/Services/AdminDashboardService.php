@@ -3,11 +3,14 @@
 namespace App\Services;
 
 use App\Models\ContactMessage;
+use App\Models\AuditLog;
 use App\Models\Motorcycle;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\SalesRequest;
+use App\Models\ServiceSlot;
 use App\Models\ServiceRequest;
+use App\Models\StockMovement;
 use App\Models\StatusHistory;
 use App\Models\User;
 
@@ -18,8 +21,11 @@ class AdminDashboardService
         $motorcycles = Motorcycle::latest()->get();
         $orders = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle', 'payments'])->latest()->get();
         $salesRequests = SalesRequest::with(['user', 'motorcycle'])->latest()->get();
-        $serviceRequests = ServiceRequest::with('user')->latest()->get();
+        $serviceRequests = ServiceRequest::with(['user', 'serviceSlot'])->latest()->get();
         $payments = Payment::with(['order.user', 'user'])->latest()->get();
+        $serviceSlots = ServiceSlot::latest('service_date')->get();
+        $stockMovements = StockMovement::with(['motorcycle', 'user'])->latest()->take(50)->get();
+        $auditLogs = AuditLog::with('user')->latest()->take(50)->get();
         $messages = ContactMessage::latest()->get();
         $users = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest()->get();
         $statusHistories = StatusHistory::with('user')->latest()->take(20)->get();
@@ -30,6 +36,9 @@ class AdminDashboardService
             'sales_requests' => $salesRequests,
             'service_requests' => $serviceRequests,
             'payments' => $payments,
+            'service_slots' => $serviceSlots,
+            'stock_movements' => $stockMovements,
+            'audit_logs' => $auditLogs,
             'messages' => $messages,
             'users' => $users,
             'status_histories' => $statusHistories,
