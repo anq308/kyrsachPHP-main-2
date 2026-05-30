@@ -3,9 +3,9 @@ import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
-import type { ClientNotification, Order, SalesRequest, ServiceRequest, User } from '../types';
+import type { ClientNotification, Order, Payment, SalesRequest, ServiceRequest, User } from '../types';
 
-type ProfileTab = 'overview' | 'orders' | 'sales' | 'service' | 'notifications';
+type ProfileTab = 'overview' | 'orders' | 'payments' | 'sales' | 'service' | 'notifications';
 
 const router = useRouter();
 
@@ -22,6 +22,8 @@ const activeTab = ref<ProfileTab>('overview');
 const expandedOrders = ref<number[]>([]);
 
 const latestOrder = computed(() => orders.value[0] ?? null);
+const payments = computed<Payment[]>(() => orders.value.flatMap((order) => order.payments ?? []));
+const pendingPayments = computed(() => payments.value.filter((payment) => payment.status === 'pending'));
 const activeOrders = computed(() => orders.value.filter((order) => !['completed', 'cancelled'].includes(order.status)));
 const activeSalesRequests = computed(() => salesRequests.value.filter((request) => !['completed', 'cancelled'].includes(request.status)));
 const activeServiceRequests = computed(() => serviceRequests.value.filter((request) => !['done', 'cancelled'].includes(request.status)));
@@ -30,6 +32,7 @@ const isStaffUser = computed(() => Boolean(user.value?.can_manage));
 const tabs = computed<Array<{ id: ProfileTab; label: string; count: number }>>(() => [
   { id: 'overview', label: 'Обзор', count: unreadNotificationsCount.value },
   { id: 'orders', label: 'Заказы', count: orders.value.length },
+  { id: 'payments', label: 'Оплаты', count: pendingPayments.value.length },
   { id: 'sales', label: 'Заявки', count: salesRequests.value.length },
   { id: 'service', label: 'Сервис', count: serviceRequests.value.length },
   { id: 'notifications', label: 'Уведомления', count: unreadNotificationsCount.value },
@@ -77,6 +80,10 @@ function paymentStatusLabel(status?: Order['payment_status']): string {
     default:
       return 'Не указан';
   }
+}
+
+function formatCurrency(value: number): string {
+  return `${Number(value || 0).toLocaleString('ru-RU')} ₽`;
 }
 
 function salesTypeLabel(type: SalesRequest['type']): string {
@@ -201,7 +208,7 @@ onMounted(loadProfile);
 
         <div class="lg:col-span-9 space-y-6">
           <section v-show="activeTab === 'overview'" class="space-y-6">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
               <button type="button" class="admin-stat-card text-left" @click="activeTab = 'orders'">
                 <span class="stat-line bg-primary" />
                 <span class="stat-label">Активные заказы</span>
@@ -219,6 +226,12 @@ onMounted(loadProfile);
                 <span class="stat-label">Сервис</span>
                 <span class="stat-value">{{ activeServiceRequests.length }}</span>
                 <span class="stat-note">записи</span>
+              </button>
+              <button type="button" class="admin-stat-card text-left" @click="activeTab = 'payments'">
+                <span class="stat-line bg-yellow-500" />
+                <span class="stat-label">Оплаты</span>
+                <span class="stat-value">{{ pendingPayments.length }}</span>
+                <span class="stat-note">ожидают</span>
               </button>
               <button type="button" class="admin-stat-card text-left" @click="activeTab = 'notifications'">
                 <span class="stat-line bg-blue-500" />
@@ -242,7 +255,7 @@ onMounted(loadProfile);
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div class="bg-dark border border-white/5 p-4">
                       <p class="text-gray-600 uppercase text-xs font-bold mb-1">Сумма</p>
-                      <p class="text-primary font-display font-bold text-xl">{{ latestOrder.total.toLocaleString('ru-RU') }} ₽</p>
+                      <p class="text-primary font-display font-bold text-xl">{{ formatCurrency(latestOrder.total) }}</p>
                     </div>
                     <div class="bg-dark border border-white/5 p-4">
                       <p class="text-gray-600 uppercase text-xs font-bold mb-1">Выдача</p>
@@ -293,7 +306,7 @@ onMounted(loadProfile);
                   <p class="text-gray-500 text-sm">{{ order.items.length }} поз. · {{ formatDate(order.created_at) }}</p>
                 </div>
                 <div class="flex items-center gap-4">
-                  <span class="text-primary font-display font-bold text-xl">{{ order.total.toLocaleString('ru-RU') }} ₽</span>
+                  <span class="text-primary font-display font-bold text-xl">{{ formatCurrency(order.total) }}</span>
                   <span class="text-gray-600">{{ isExpanded(order.id) ? 'Свернуть' : 'Подробнее' }}</span>
                 </div>
               </button>
@@ -321,10 +334,34 @@ onMounted(loadProfile);
                 <div class="space-y-2">
                   <div v-for="item in order.items" :key="item.id" class="flex items-center justify-between gap-4 py-2 border-b border-white/5 last:border-0">
                     <span class="text-gray-300">{{ item.name }} <span class="text-gray-600">× {{ item.quantity }}</span></span>
-                    <span class="text-white font-display font-bold">{{ (item.price * item.quantity).toLocaleString('ru-RU') }} ₽</span>
+                    <span class="text-white font-display font-bold">{{ formatCurrency(item.price * item.quantity) }}</span>
                   </div>
                 </div>
               </div>
+            </article>
+          </section>
+
+          <section v-show="activeTab === 'payments'" class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <h2 class="text-3xl font-display font-bold text-white uppercase">Мои оплаты</h2>
+              <RouterLink to="/catalog" class="filter-chip">К покупкам</RouterLink>
+            </div>
+            <div v-if="!payments.length" class="empty-panel">Оплат пока нет. После оформления заказа здесь появится способ оплаты и статус.</div>
+            <article v-for="payment in payments" v-else :key="payment.id" class="bg-dark-lighter border border-white/5 p-5">
+              <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <p class="text-white font-display font-bold uppercase">Оплата #{{ payment.id }} · Заказ #{{ payment.order_id }}</p>
+                  <p class="text-gray-500 text-sm mt-1">{{ paymentMethodLabel(payment.method) }} · {{ formatDate(payment.created_at) }}</p>
+                  <p v-if="payment.transaction_id" class="text-gray-600 text-xs mt-2">{{ payment.transaction_id }}</p>
+                </div>
+                <div class="md:text-right">
+                  <p class="text-primary font-display font-bold text-2xl">{{ formatCurrency(payment.amount) }}</p>
+                  <StatusBadge :status="payment.status" />
+                </div>
+              </div>
+              <p class="text-gray-500 text-sm mt-4">
+                {{ payment.status === 'paid' ? 'Оплата подтверждена менеджером.' : 'После подтверждения оплаты менеджером вы получите уведомление.' }}
+              </p>
             </article>
           </section>
 

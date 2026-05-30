@@ -29,6 +29,10 @@ const labels: Record<string, string> = {
   manager: 'Менеджер',
   client: 'Клиент',
   user: 'Клиент',
+  pending: 'Ожидает',
+  paid: 'Оплачено',
+  failed: 'Ошибка',
+  refunded: 'Возврат',
 };
 
 const classes = computed(() => {
@@ -49,6 +53,10 @@ const classes = computed(() => {
     manager: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
     client: 'border-white/10 bg-white/5 text-gray-400',
     user: 'border-white/10 bg-white/5 text-gray-400',
+    pending: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-300',
+    paid: 'border-green-500/30 bg-green-500/10 text-green-300',
+    failed: 'border-red-500/30 bg-red-500/10 text-red-300',
+    refunded: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
   };
 
   return palette[props.status] ?? 'border-white/10 bg-white/5 text-gray-300';

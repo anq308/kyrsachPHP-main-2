@@ -93,6 +93,8 @@ export interface Payment {
   transaction_id: string | null;
   paid_at: string | null;
   created_at: string;
+  order?: Order | null;
+  user?: User | null;
 }
 
 export interface ClientNotification {
@@ -122,6 +124,7 @@ export interface Order {
   pickup_point?: PickupPoint | null;
   reservations?: Reservation[];
   payments?: Payment[];
+  user?: User | null;
   items: OrderItem[];
   created_at: string;
 }

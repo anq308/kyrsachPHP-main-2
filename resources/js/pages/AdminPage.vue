@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
 import { sessionState } from '../session';
-import type { ContactMessage, Motorcycle, Order, SalesRequest, ServiceRequest, StatusHistory, User } from '../types';
+import type { ContactMessage, Motorcycle, Order, Payment, SalesRequest, ServiceRequest, StatusHistory, User } from '../types';
 
 interface DashboardStats {
   usersCount: number;
@@ -11,10 +11,17 @@ interface DashboardStats {
   salesRequestsCount: number;
   serviceRequestsCount: number;
   contactMessagesCount: number;
+  paymentsCount: number;
+  pendingPaymentsCount: number;
+  paidPaymentsTotal: number;
   newSalesRequestsCount: number;
   newServiceRequestsCount: number;
   totalRevenue: number;
   unavailableCount: number;
+  stockUnits: number;
+  reservedUnits: number;
+  availableUnits: number;
+  lowStockCount: number;
 }
 
 interface AdminUser extends User {
@@ -31,7 +38,7 @@ interface DashboardAnalytics {
   salesConversion: number;
 }
 
-type AdminTab = 'dashboard' | 'orders' | 'sales' | 'service' | 'products' | 'users' | 'messages';
+type AdminTab = 'dashboard' | 'orders' | 'payments' | 'warehouse' | 'sales' | 'service' | 'products' | 'users' | 'messages';
 type ProductGroupMode = 'type' | 'brand' | 'availability';
 
 const loading = ref(true);
@@ -51,6 +58,7 @@ const expandedOrders = ref<number[]>([]);
 const statusCommentModalOpen = ref(false);
 const statusCommentText = ref('');
 const statusCommentSaving = ref(false);
+const stockSavingId = ref<number | null>(null);
 const pendingStatusAction = ref<{
   title: string;
   subtitle: string;
@@ -60,6 +68,7 @@ const pendingStatusAction = ref<{
 
 const motorcycles = ref<Motorcycle[]>([]);
 const orders = ref<Order[]>([]);
+const payments = ref<Payment[]>([]);
 const salesRequests = ref<SalesRequest[]>([]);
 const serviceRequests = ref<ServiceRequest[]>([]);
 const users = ref<AdminUser[]>([]);
@@ -71,10 +80,17 @@ const stats = ref<DashboardStats>({
   salesRequestsCount: 0,
   serviceRequestsCount: 0,
   contactMessagesCount: 0,
+  paymentsCount: 0,
+  pendingPaymentsCount: 0,
+  paidPaymentsTotal: 0,
   newSalesRequestsCount: 0,
   newServiceRequestsCount: 0,
   totalRevenue: 0,
   unavailableCount: 0,
+  stockUnits: 0,
+  reservedUnits: 0,
+  availableUnits: 0,
+  lowStockCount: 0,
 });
 const analytics = ref<DashboardAnalytics>({
   monthlyRevenue: 0,
@@ -85,6 +101,7 @@ const analytics = ref<DashboardAnalytics>({
 });
 
 const editingId = ref<number | null>(null);
+const stockForms = reactive<Record<number, { stock_quantity: number; reserved_quantity: number }>>({});
 
 const form = reactive({
   brand: '',
@@ -109,6 +126,8 @@ const form = reactive({
 const tabs: Array<{ id: AdminTab; label: string; hint: string }> = [
   { id: 'dashboard', label: 'Сводка', hint: 'Что требует внимания' },
   { id: 'orders', label: 'Заказы', hint: 'Оплата, бронь, выдача' },
+  { id: 'payments', label: 'Оплаты', hint: 'Статусы и транзакции' },
+  { id: 'warehouse', label: 'Склад', hint: 'Остатки и резерв' },
   { id: 'sales', label: 'Покупка', hint: 'Заявки клиентов' },
   { id: 'service', label: 'Сервис', hint: 'Записи на обслуживание' },
   { id: 'products', label: 'Товары', hint: 'Склад и каталог' },
@@ -143,6 +162,13 @@ const serviceStatusOptions: Array<{ value: 'all' | ServiceRequest['status']; lab
   { value: 'cancelled', label: 'Отменённые' },
 ];
 
+const paymentStatusOptions: Array<{ value: Payment['status']; label: string }> = [
+  { value: 'pending', label: 'Ожидает' },
+  { value: 'paid', label: 'Оплачено' },
+  { value: 'failed', label: 'Ошибка' },
+  { value: 'refunded', label: 'Возврат' },
+];
+
 const salesTypeLabels: Record<SalesRequest['type'], string> = {
   purchase: 'Покупка',
   consultation: 'Консультация',
@@ -166,9 +192,12 @@ const roleOptions: Array<{ value: User['role']; label: string }> = [
 const activeTabMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
 const urgentOrders = computed(() => orders.value.filter((order) => ['new', 'processing', 'approved'].includes(order.status)));
 const readyOrders = computed(() => orders.value.filter((order) => order.status === 'ready_for_pickup'));
+const pendingPayments = computed(() => payments.value.filter((payment) => payment.status === 'pending'));
+const paidPayments = computed(() => payments.value.filter((payment) => payment.status === 'paid'));
 const newSalesRequests = computed(() => salesRequests.value.filter((request) => request.status === 'new'));
 const newServiceRequests = computed(() => serviceRequests.value.filter((request) => request.status === 'new'));
 const unavailableMotorcycles = computed(() => motorcycles.value.filter((moto) => !moto.is_available));
+const lowStockMotorcycles = computed(() => motorcycles.value.filter((moto) => availableStock(moto) <= 1));
 const canEditRoles = computed(() => sessionState.user?.role === 'admin');
 
 const filteredMotorcycles = computed(() => {
@@ -192,6 +221,9 @@ const inventorySummary = computed(() => {
   return {
     totalValue: motorcycles.value.reduce((sum, moto) => sum + Number(moto.price || 0), 0),
     availableCount: available.length,
+    stockUnits: motorcycles.value.reduce((sum, moto) => sum + Number(moto.stock_quantity || 0), 0),
+    reservedUnits: motorcycles.value.reduce((sum, moto) => sum + Number(moto.reserved_quantity || 0), 0),
+    availableUnits: motorcycles.value.reduce((sum, moto) => sum + availableStock(moto), 0),
     averagePrice: motorcycles.value.length
       ? Math.round(motorcycles.value.reduce((sum, moto) => sum + Number(moto.price || 0), 0) / motorcycles.value.length)
       : 0,
@@ -221,6 +253,8 @@ function tabCount(tab: AdminTab): number {
   const counts: Record<AdminTab, number> = {
     dashboard: urgentOrders.value.length + newSalesRequests.value.length + newServiceRequests.value.length,
     orders: orders.value.length,
+    payments: payments.value.length,
+    warehouse: lowStockMotorcycles.value.length,
     sales: salesRequests.value.length,
     service: serviceRequests.value.length,
     products: motorcycles.value.length,
@@ -229,6 +263,10 @@ function tabCount(tab: AdminTab): number {
   };
 
   return counts[tab];
+}
+
+function availableStock(moto: Motorcycle): number {
+  return Math.max(0, Number(moto.stock_quantity || 0) - Number(moto.reserved_quantity || 0));
 }
 
 function formatCurrency(value: number): string {
@@ -283,6 +321,14 @@ function paymentStatusLabel(status?: Order['payment_status']): string {
     default:
       return 'Не указан';
   }
+}
+
+function paymentOwner(payment: Payment): string {
+  return payment.user?.name || payment.order?.user?.name || payment.order?.name || 'Гость';
+}
+
+function orderLabel(payment: Payment): string {
+  return payment.order ? `Заказ #${payment.order.id}` : `Заказ #${payment.order_id}`;
 }
 
 function reservationLabel(order: Order): string {
@@ -436,6 +482,15 @@ function editMotorcycle(moto: Motorcycle) {
   activeTab.value = 'products';
 }
 
+function syncStockForms() {
+  motorcycles.value.forEach((moto) => {
+    stockForms[moto.id] = {
+      stock_quantity: Number(moto.stock_quantity ?? 0),
+      reserved_quantity: Number(moto.reserved_quantity ?? 0),
+    };
+  });
+}
+
 async function loadDashboard() {
   loading.value = true;
   errorText.value = '';
@@ -444,6 +499,7 @@ async function loadDashboard() {
     const { data } = await api.get('/admin/dashboard');
     motorcycles.value = data.motorcycles ?? [];
     orders.value = data.orders ?? [];
+    payments.value = data.payments ?? [];
     salesRequests.value = data.sales_requests ?? [];
     serviceRequests.value = data.service_requests ?? [];
     users.value = data.users ?? [];
@@ -451,6 +507,7 @@ async function loadDashboard() {
     statusHistories.value = data.status_histories ?? [];
     stats.value = data.stats;
     analytics.value = data.analytics ?? analytics.value;
+    syncStockForms();
   } catch {
     errorText.value = 'Не удалось загрузить данные админ-панели.';
   } finally {
@@ -502,6 +559,38 @@ async function updateOrderStatus(orderId: number, status: Order['status'], statu
     await loadDashboard();
   } catch {
     errorText.value = 'Не удалось обновить статус заказа.';
+  }
+}
+
+async function updatePaymentStatus(paymentId: number, status: Payment['status']) {
+  try {
+    const { data } = await api.patch(`/admin/payments/${paymentId}/status`, { status });
+    successText.value = data.message;
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось обновить статус оплаты.';
+  }
+}
+
+async function saveStock(moto: Motorcycle) {
+  const payload = stockForms[moto.id];
+
+  if (!payload) {
+    return;
+  }
+
+  stockSavingId.value = moto.id;
+  errorText.value = '';
+  successText.value = '';
+
+  try {
+    const { data } = await api.patch(`/admin/motorcycles/${moto.id}/stock`, payload);
+    successText.value = data.message;
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось обновить складской остаток.';
+  } finally {
+    stockSavingId.value = null;
   }
 }
 
@@ -670,6 +759,10 @@ onMounted(loadDashboard);
                 <span class="text-green-300 font-bold">{{ inventorySummary.availableCount }}</span>
               </div>
               <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-500">Доступно / резерв</span>
+                <span class="text-white font-bold">{{ inventorySummary.availableUnits }} / {{ inventorySummary.reservedUnits }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
                 <span class="text-gray-500">Нет в наличии</span>
                 <span class="text-red-300 font-bold">{{ unavailableMotorcycles.length }}</span>
               </div>
@@ -717,7 +810,7 @@ onMounted(loadDashboard);
                 <h2 class="text-3xl font-display font-bold text-white uppercase italic">{{ activeTabMeta.label }}</h2>
                 <p class="text-gray-500 mt-1">{{ activeTabMeta.hint }}</p>
               </div>
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                 <div class="bg-dark border border-white/5 p-3">
                   <p class="text-gray-600 text-xs uppercase font-bold">Заказы</p>
                   <p class="text-white font-display font-bold text-xl">{{ stats.ordersCount }}</p>
@@ -734,12 +827,16 @@ onMounted(loadDashboard);
                   <p class="text-gray-600 text-xs uppercase font-bold">Клиенты</p>
                   <p class="text-white font-display font-bold text-xl">{{ stats.usersCount }}</p>
                 </div>
+                <div class="bg-dark border border-white/5 p-3">
+                  <p class="text-gray-600 text-xs uppercase font-bold">Оплаты</p>
+                  <p class="text-yellow-300 font-display font-bold text-xl">{{ pendingPayments.length }}</p>
+                </div>
               </div>
             </div>
           </section>
 
           <section v-show="activeTab === 'dashboard'" class="space-y-6">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
               <button type="button" class="admin-record text-left" @click="activeTab = 'orders'">
                 <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Заказы требуют действий</p>
                 <p class="text-4xl text-white font-display font-bold">{{ urgentOrders.length }}</p>
@@ -754,6 +851,11 @@ onMounted(loadDashboard);
                 <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Новые записи на сервис</p>
                 <p class="text-4xl text-green-300 font-display font-bold">{{ newServiceRequests.length }}</p>
                 <p class="text-gray-500 text-sm mt-2">нужно подтвердить дату</p>
+              </button>
+              <button type="button" class="admin-record text-left" @click="activeTab = 'payments'">
+                <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Оплаты ожидают проверки</p>
+                <p class="text-4xl text-yellow-300 font-display font-bold">{{ pendingPayments.length }}</p>
+                <p class="text-gray-500 text-sm mt-2">{{ formatCurrency(stats.paidPaymentsTotal) }} оплачено</p>
               </button>
             </div>
 
@@ -916,6 +1018,140 @@ onMounted(loadDashboard);
               </div>
             </article>
             <div v-if="!orders.length" class="empty-panel">Заказов пока нет.</div>
+          </section>
+
+          <section v-show="activeTab === 'payments'" class="space-y-5">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div class="bg-dark-lighter border border-white/5 p-5">
+                <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Всего оплат</p>
+                <p class="text-3xl text-white font-display font-bold">{{ payments.length }}</p>
+              </div>
+              <div class="bg-dark-lighter border border-white/5 p-5">
+                <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Ожидают оплаты</p>
+                <p class="text-3xl text-yellow-300 font-display font-bold">{{ pendingPayments.length }}</p>
+              </div>
+              <div class="bg-dark-lighter border border-white/5 p-5">
+                <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Оплачено</p>
+                <p class="text-3xl text-primary font-display font-bold">{{ formatCurrency(stats.paidPaymentsTotal) }}</p>
+              </div>
+            </div>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="px-5 py-4 border-b border-white/5">
+                <h3 class="text-xl font-display font-bold text-white uppercase">Оплаты заказов</h3>
+                <p class="text-gray-500 text-sm mt-1">Менеджер видит способ оплаты, транзакцию и может подтвердить оплату.</p>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Оплата</th>
+                      <th class="hidden md:table-cell">Клиент</th>
+                      <th>Сумма</th>
+                      <th class="hidden lg:table-cell">Транзакция</th>
+                      <th>Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="payment in payments" :key="payment.id">
+                      <td>
+                        <p class="text-white font-display font-bold uppercase">#{{ payment.id }} · {{ orderLabel(payment) }}</p>
+                        <p class="text-gray-600 text-xs">{{ paymentMethodLabel(payment.method) }} · {{ formatDate(payment.created_at) }}</p>
+                      </td>
+                      <td class="hidden md:table-cell">
+                        <p class="text-gray-300 text-sm">{{ paymentOwner(payment) }}</p>
+                        <p class="text-gray-600 text-xs">{{ payment.order?.phone || payment.user?.email || 'контакты в заказе' }}</p>
+                      </td>
+                      <td><span class="text-primary font-display font-bold text-lg">{{ formatCurrency(payment.amount) }}</span></td>
+                      <td class="hidden lg:table-cell">
+                        <p class="text-gray-500 text-xs">{{ payment.transaction_id || 'будет создана при подтверждении' }}</p>
+                        <p class="text-gray-600 text-xs">{{ payment.paid_at ? formatDate(payment.paid_at) : 'не оплачено' }}</p>
+                      </td>
+                      <td>
+                        <div class="flex flex-col gap-2">
+                          <StatusBadge :status="payment.status" />
+                          <select class="field-dark min-w-40" :value="payment.status" @change="updatePaymentStatus(payment.id, ($event.target as HTMLSelectElement).value as Payment['status'])">
+                            <option v-for="option in paymentStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                          </select>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="!payments.length" class="empty-panel">Оплат пока нет.</div>
+            </section>
+          </section>
+
+          <section v-show="activeTab === 'warehouse'" class="space-y-5">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div class="bg-dark-lighter border border-white/5 p-5">
+                <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Всего единиц</p>
+                <p class="text-3xl text-white font-display font-bold">{{ inventorySummary.stockUnits }}</p>
+              </div>
+              <div class="bg-dark-lighter border border-white/5 p-5">
+                <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Доступно</p>
+                <p class="text-3xl text-green-300 font-display font-bold">{{ inventorySummary.availableUnits }}</p>
+              </div>
+              <div class="bg-dark-lighter border border-white/5 p-5">
+                <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">В резерве</p>
+                <p class="text-3xl text-yellow-300 font-display font-bold">{{ inventorySummary.reservedUnits }}</p>
+              </div>
+              <div class="bg-dark-lighter border border-white/5 p-5">
+                <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Низкий остаток</p>
+                <p class="text-3xl text-primary font-display font-bold">{{ lowStockMotorcycles.length }}</p>
+              </div>
+            </div>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="px-5 py-4 border-b border-white/5">
+                <h3 class="text-xl font-display font-bold text-white uppercase">Складской контроль</h3>
+                <p class="text-gray-500 text-sm mt-1">Остаток, резерв и доступное количество по каждой модели.</p>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Модель</th>
+                      <th>Склад</th>
+                      <th>Резерв</th>
+                      <th>Доступно</th>
+                      <th class="text-right">Сохранить</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="motorcycle in motorcycles" :key="motorcycle.id">
+                      <td>
+                        <div class="flex items-center gap-4">
+                          <div class="w-12 h-12 bg-dark border border-white/5 overflow-hidden flex-shrink-0"><img :src="motorcycle.image_url" alt="" class="w-full h-full object-cover" /></div>
+                          <div>
+                            <p class="text-white font-display font-bold uppercase">{{ motorcycle.brand }} {{ motorcycle.model }}</p>
+                            <p class="text-gray-600 text-xs">{{ motorcycle.type }} · {{ formatCurrency(motorcycle.price) }}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <input v-if="stockForms[motorcycle.id]" v-model.number="stockForms[motorcycle.id].stock_quantity" type="number" min="0" class="field-dark w-28" />
+                      </td>
+                      <td>
+                        <input v-if="stockForms[motorcycle.id]" v-model.number="stockForms[motorcycle.id].reserved_quantity" type="number" min="0" class="field-dark w-28" />
+                      </td>
+                      <td>
+                        <div class="flex flex-col gap-1">
+                          <span class="text-white font-display font-bold text-lg">{{ availableStock(motorcycle) }}</span>
+                          <StatusBadge :status="motorcycle.is_available ? 'available' : 'unavailable'" kind="product" />
+                        </div>
+                      </td>
+                      <td class="text-right">
+                        <button type="button" class="filter-chip" :disabled="stockSavingId === motorcycle.id" @click="saveStock(motorcycle)">
+                          {{ stockSavingId === motorcycle.id ? 'Сохранение...' : 'Обновить' }}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </section>
 
           <section v-show="activeTab === 'sales'" class="space-y-4">

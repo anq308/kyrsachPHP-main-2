@@ -18,6 +18,7 @@ use App\Models\ContactMessage;
 use App\Models\Favorite;
 use App\Models\Motorcycle;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\PickupPoint;
 use App\Models\SalesRequest;
 use App\Models\ServiceRequest;
@@ -575,6 +576,41 @@ class SpaApiController extends Controller
         ]);
     }
 
+    public function adminPaymentsIndex(Request $request): JsonResponse
+    {
+        $query = Payment::with(['order.user', 'user'])->latest();
+
+        if ($request->filled('status') && in_array($request->input('status'), Payment::STATUSES, true)) {
+            $query->where('status', $request->input('status'));
+        }
+
+        if ($request->filled('method') && in_array($request->input('method'), Order::PAYMENT_METHODS, true)) {
+            $query->where('method', $request->input('method'));
+        }
+
+        if ($request->filled('search')) {
+            $search = $request->string('search')->toString();
+            $query->where(function ($q) use ($search) {
+                $q->where('transaction_id', 'like', "%{$search}%")
+                    ->orWhere('id', $search)
+                    ->orWhere('order_id', $search)
+                    ->orWhereHas('user', function ($userQuery) use ($search) {
+                        $userQuery->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    })
+                    ->orWhereHas('order', function ($orderQuery) use ($search) {
+                        $orderQuery->where('name', 'like', "%{$search}%")
+                            ->orWhere('phone', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        return response()->json([
+            'payments' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
     public function adminUsersIndex(Request $request): JsonResponse
     {
         $query = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest();
@@ -629,6 +665,29 @@ class SpaApiController extends Controller
         ]);
     }
 
+    public function adminUpdateMotorcycleStock(Request $request, string $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'stock_quantity' => ['required', 'integer', 'min:0'],
+            'reserved_quantity' => ['required', 'integer', 'min:0'],
+        ]);
+
+        if ($validated['reserved_quantity'] > $validated['stock_quantity']) {
+            throw ValidationException::withMessages([
+                'reserved_quantity' => 'Резерв не может быть больше общего остатка.',
+            ]);
+        }
+
+        $motorcycle = Motorcycle::findOrFail($id);
+        $motorcycle->update($validated);
+        $motorcycle->refreshAvailability();
+
+        return response()->json([
+            'message' => 'Складской остаток обновлён.',
+            'motorcycle' => $motorcycle->fresh(),
+        ]);
+    }
+
     public function adminDeleteMotorcycle(string $id): JsonResponse
     {
         $motorcycle = Motorcycle::findOrFail($id);
@@ -653,6 +712,39 @@ class SpaApiController extends Controller
         return response()->json([
             'message' => 'Статус заказа #'.$order->id.' обновлён.',
             'order' => $order,
+        ]);
+    }
+
+    public function adminUpdatePaymentStatus(Request $request, string $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'status' => ['required', 'in:'.implode(',', Payment::STATUSES)],
+            'transaction_id' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $payment = Payment::with(['order', 'user'])->findOrFail($id);
+        $oldStatus = $payment->status;
+        $status = $validated['status'];
+
+        $payment->forceFill([
+            'status' => $status,
+            'transaction_id' => $validated['transaction_id']
+                ?? $payment->transaction_id
+                ?? ($status === 'paid' ? 'MANUAL-'.now()->format('YmdHis').'-'.$payment->id : null),
+            'paid_at' => $status === 'paid' ? ($payment->paid_at ?? now()) : null,
+        ])->save();
+
+        $payment->order?->forceFill([
+            'payment_status' => $status,
+        ])->save();
+
+        if ($oldStatus !== $status && $payment->order) {
+            $this->notifyPaymentCustomer($payment, $oldStatus);
+        }
+
+        return response()->json([
+            'message' => 'Статус оплаты #'.$payment->id.' обновлён.',
+            'payment' => $payment->fresh(['order.user', 'user']),
         ]);
     }
 
@@ -779,6 +871,25 @@ class SpaApiController extends Controller
         if (isset($messages[$serviceRequest->status])) {
             [$title, $message] = $messages[$serviceRequest->status];
             $this->notificationService->create($serviceRequest->user, $title, $message, 'service_request');
+        }
+    }
+
+    private function notifyPaymentCustomer(Payment $payment, ?string $oldStatus): void
+    {
+        if ($oldStatus === $payment->status || ! $payment->order) {
+            return;
+        }
+
+        $messages = [
+            'paid' => ['Оплата подтверждена', "Оплата по заказу #{$payment->order_id} подтверждена."],
+            'pending' => ['Оплата ожидается', "По заказу #{$payment->order_id} ожидается оплата."],
+            'failed' => ['Оплата не прошла', "По заказу #{$payment->order_id} требуется повторная оплата или связь с менеджером."],
+            'refunded' => ['Оплата возвращена', "По заказу #{$payment->order_id} оформлен возврат оплаты."],
+        ];
+
+        if (isset($messages[$payment->status])) {
+            [$title, $message] = $messages[$payment->status];
+            $this->notificationService->create($payment->order->user, $title, $message, 'payment');
         }
     }
 

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ContactMessage;
 use App\Models\Motorcycle;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\SalesRequest;
 use App\Models\ServiceRequest;
 use App\Models\StatusHistory;
@@ -18,6 +19,7 @@ class AdminDashboardService
         $orders = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle', 'payments'])->latest()->get();
         $salesRequests = SalesRequest::with(['user', 'motorcycle'])->latest()->get();
         $serviceRequests = ServiceRequest::with('user')->latest()->get();
+        $payments = Payment::with(['order.user', 'user'])->latest()->get();
         $messages = ContactMessage::latest()->get();
         $users = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest()->get();
         $statusHistories = StatusHistory::with('user')->latest()->take(20)->get();
@@ -27,6 +29,7 @@ class AdminDashboardService
             'orders' => $orders,
             'sales_requests' => $salesRequests,
             'service_requests' => $serviceRequests,
+            'payments' => $payments,
             'messages' => $messages,
             'users' => $users,
             'status_histories' => $statusHistories,
@@ -67,10 +70,17 @@ class AdminDashboardService
                 'salesRequestsCount' => $salesRequests->count(),
                 'serviceRequestsCount' => $serviceRequests->count(),
                 'contactMessagesCount' => $messages->count(),
+                'paymentsCount' => $payments->count(),
+                'pendingPaymentsCount' => $payments->where('status', 'pending')->count(),
+                'paidPaymentsTotal' => $payments->where('status', 'paid')->sum('amount'),
                 'newSalesRequestsCount' => $salesRequests->where('status', 'new')->count(),
                 'newServiceRequestsCount' => $serviceRequests->where('status', 'new')->count(),
                 'totalRevenue' => $orders->where('status', '!=', 'cancelled')->sum('total'),
                 'unavailableCount' => $motorcycles->where('is_available', false)->count(),
+                'stockUnits' => $motorcycles->sum('stock_quantity'),
+                'reservedUnits' => $motorcycles->sum('reserved_quantity'),
+                'availableUnits' => $motorcycles->sum(fn ($motorcycle) => $motorcycle->availableStock()),
+                'lowStockCount' => $motorcycles->filter(fn ($motorcycle) => $motorcycle->availableStock() <= 1)->count(),
             ],
         ];
     }

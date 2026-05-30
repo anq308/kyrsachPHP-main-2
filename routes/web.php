@@ -46,10 +46,13 @@ Route::prefix('api')->group(function () {
     Route::middleware(['auth', 'is_admin'])->prefix('admin')->group(function () {
         Route::get('/dashboard', [SpaApiController::class, 'adminDashboard']);
         Route::get('/orders', [SpaApiController::class, 'adminOrdersIndex']);
+        Route::get('/payments', [SpaApiController::class, 'adminPaymentsIndex']);
         Route::post('/motorcycles', [SpaApiController::class, 'adminStoreMotorcycle']);
         Route::put('/motorcycles/{id}', [SpaApiController::class, 'adminUpdateMotorcycle']);
+        Route::patch('/motorcycles/{id}/stock', [SpaApiController::class, 'adminUpdateMotorcycleStock']);
         Route::delete('/motorcycles/{id}', [SpaApiController::class, 'adminDeleteMotorcycle']);
         Route::patch('/orders/{id}/status', [SpaApiController::class, 'adminUpdateOrderStatus']);
+        Route::patch('/payments/{id}/status', [SpaApiController::class, 'adminUpdatePaymentStatus']);
         Route::get('/applications', [SpaApiController::class, 'adminSalesRequestsIndex']);
         Route::patch('/applications/{id}/status', [SpaApiController::class, 'adminUpdateSalesRequestStatus']);
         Route::delete('/applications/{id}', [SpaApiController::class, 'adminDeleteSalesRequest']);

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Motorcycle;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\PickupPoint;
 use App\Models\Reservation;
 use App\Models\SalesRequest;
@@ -388,6 +389,73 @@ class BackendWorkflowTest extends TestCase
             ->assertOk()
             ->assertJsonPath('orders.data.0.status', 'ready_for_pickup')
             ->assertJsonPath('orders.per_page', 1);
+    }
+
+    public function test_admin_can_update_payment_status_and_notify_customer(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $customer = User::factory()->create();
+        $order = Order::create([
+            'user_id' => $customer->id,
+            'name' => 'Клиент оплаты',
+            'phone' => '+79990000401',
+            'total' => 210000,
+            'status' => 'approved',
+            'payment_method' => 'cash_pickup',
+            'payment_status' => 'pending',
+            'pickup_point_id' => $this->pickupPoint()->id,
+        ]);
+        $payment = Payment::create([
+            'order_id' => $order->id,
+            'user_id' => $customer->id,
+            'amount' => 210000,
+            'method' => 'cash_pickup',
+            'status' => 'pending',
+        ]);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/admin/payments/{$payment->id}/status", [
+                'status' => 'paid',
+            ])
+            ->assertOk()
+            ->assertJsonPath('payment.status', 'paid');
+
+        $this->assertSame('paid', $order->fresh()->payment_status);
+        $this->assertNotNull($payment->fresh()->transaction_id);
+        $this->assertDatabaseHas('client_notifications', [
+            'user_id' => $customer->id,
+            'title' => 'Оплата подтверждена',
+            'type' => 'payment',
+            'is_read' => false,
+        ]);
+    }
+
+    public function test_admin_can_update_motorcycle_stock(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $motorcycle = Motorcycle::factory()->create([
+            'is_available' => false,
+            'stock_quantity' => 0,
+            'reserved_quantity' => 0,
+        ]);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/admin/motorcycles/{$motorcycle->id}/stock", [
+                'stock_quantity' => 5,
+                'reserved_quantity' => 2,
+            ])
+            ->assertOk()
+            ->assertJsonPath('motorcycle.stock_quantity', 5)
+            ->assertJsonPath('motorcycle.reserved_quantity', 2)
+            ->assertJsonPath('motorcycle.is_available', true);
+
+        $this->actingAs($admin)
+            ->patchJson("/api/admin/motorcycles/{$motorcycle->id}/stock", [
+                'stock_quantity' => 1,
+                'reserved_quantity' => 2,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('reserved_quantity');
     }
 
     public function test_admin_can_filter_users_by_role(): void
