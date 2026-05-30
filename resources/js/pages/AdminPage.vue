@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
 import { sessionState } from '../session';
-import type { AuditLog, ContactMessage, Motorcycle, Order, Payment, SalesRequest, ServiceRequest, ServiceSlot, StatusHistory, StockMovement, User } from '../types';
+import type { AuditLog, ContactMessage, Motorcycle, Order, Payment, SalesRequest, ServiceRequest, ServiceSlot, StatusHistory, StockMovement, User, WarehouseTask } from '../types';
 
 interface DashboardStats {
   usersCount: number;
@@ -22,6 +22,8 @@ interface DashboardStats {
   reservedUnits: number;
   availableUnits: number;
   lowStockCount: number;
+  warehouseTasksCount: number;
+  newWarehouseTasksCount: number;
 }
 
 interface AdminUser extends User {
@@ -59,6 +61,7 @@ const statusCommentModalOpen = ref(false);
 const statusCommentText = ref('');
 const statusCommentSaving = ref(false);
 const stockSavingId = ref<number | null>(null);
+const warehouseTaskSavingId = ref<number | null>(null);
 const slotSaving = ref(false);
 const selectedCustomerId = ref<number | null>(null);
 const pendingStatusAction = ref<{
@@ -73,6 +76,7 @@ const orders = ref<Order[]>([]);
 const payments = ref<Payment[]>([]);
 const serviceSlots = ref<ServiceSlot[]>([]);
 const stockMovements = ref<StockMovement[]>([]);
+const warehouseTasks = ref<WarehouseTask[]>([]);
 const auditLogs = ref<AuditLog[]>([]);
 const salesRequests = ref<SalesRequest[]>([]);
 const serviceRequests = ref<ServiceRequest[]>([]);
@@ -96,6 +100,8 @@ const stats = ref<DashboardStats>({
   reservedUnits: 0,
   availableUnits: 0,
   lowStockCount: 0,
+  warehouseTasksCount: 0,
+  newWarehouseTasksCount: 0,
 });
 const analytics = ref<DashboardAnalytics>({
   monthlyRevenue: 0,
@@ -209,15 +215,49 @@ const roleOptions: Array<{ value: User['role']; label: string }> = [
   { value: 'admin', label: 'Администратор' },
 ];
 
+const warehouseTaskStatusOptions: Array<{ value: WarehouseTask['status']; label: string }> = [
+  { value: 'new', label: 'Новая' },
+  { value: 'in_progress', label: 'В работе' },
+  { value: 'completed', label: 'Подготовлено' },
+  { value: 'cancelled', label: 'Отменена' },
+];
+
 const serviceSlotStatusOptions: Array<{ value: ServiceSlot['status']; label: string }> = [
   { value: 'available', label: 'Доступен' },
   { value: 'booked', label: 'Занят' },
   { value: 'closed', label: 'Закрыт' },
 ];
 
-const activeTabMeta = computed(() => tabs.find((tab) => tab.id === activeTab.value) ?? tabs[0]);
+const allowedTabIds = computed<AdminTab[]>(() => {
+  const user = sessionState.user;
+
+  if (!user) {
+    return ['dashboard'];
+  }
+
+  if (user.role === 'admin' || user.role === 'manager') {
+    return tabs.map((tab) => tab.id);
+  }
+
+  if (user.role === 'sales_manager') {
+    return ['orders', 'payments', 'sales', 'users', 'messages'];
+  }
+
+  if (user.role === 'service_manager') {
+    return ['schedule', 'service', 'users', 'messages'];
+  }
+
+  if (user.role === 'warehouse_manager') {
+    return ['warehouse', 'products'];
+  }
+
+  return ['dashboard'];
+});
+const visibleTabs = computed(() => tabs.filter((tab) => allowedTabIds.value.includes(tab.id)));
+const activeTabMeta = computed(() => visibleTabs.value.find((tab) => tab.id === activeTab.value) ?? visibleTabs.value[0] ?? tabs[0]);
 const urgentOrders = computed(() => orders.value.filter((order) => ['new', 'processing', 'approved'].includes(order.status)));
 const readyOrders = computed(() => orders.value.filter((order) => order.status === 'ready_for_pickup'));
+const openWarehouseTasks = computed(() => warehouseTasks.value.filter((task) => ['new', 'in_progress'].includes(task.status)));
 const pendingPayments = computed(() => payments.value.filter((payment) => payment.status === 'pending'));
 const paidPayments = computed(() => payments.value.filter((payment) => payment.status === 'paid'));
 const availableServiceSlots = computed(() => serviceSlots.value.filter((slot) => slot.status === 'available'));
@@ -282,7 +322,7 @@ function tabCount(tab: AdminTab): number {
     dashboard: urgentOrders.value.length + newSalesRequests.value.length + newServiceRequests.value.length,
     orders: orders.value.length,
     payments: payments.value.length,
-    warehouse: lowStockMotorcycles.value.length,
+    warehouse: openWarehouseTasks.value.length + lowStockMotorcycles.value.length,
     schedule: availableServiceSlots.value.length,
     sales: salesRequests.value.length,
     service: serviceRequests.value.length,
@@ -293,6 +333,14 @@ function tabCount(tab: AdminTab): number {
   };
 
   return counts[tab];
+}
+
+function canOpen(tab: AdminTab): boolean {
+  return allowedTabIds.value.includes(tab);
+}
+
+function setActiveTab(tab: AdminTab) {
+  activeTab.value = canOpen(tab) ? tab : (visibleTabs.value[0]?.id ?? 'dashboard');
 }
 
 function availableStock(moto: Motorcycle): number {
@@ -359,6 +407,10 @@ function paymentOwner(payment: Payment): string {
 
 function slotLabel(slot: ServiceSlot): string {
   return `${new Date(slot.service_date).toLocaleDateString('ru-RU')} ${slot.starts_at.slice(0, 5)}-${slot.ends_at.slice(0, 5)}`;
+}
+
+function warehouseTaskLabel(task: WarehouseTask): string {
+  return task.motorcycle ? `${task.motorcycle.brand} ${task.motorcycle.model}` : `Товар #${task.motorcycle_id ?? 'не указан'}`;
 }
 
 function auditEntityLabel(log: AuditLog): string {
@@ -565,6 +617,7 @@ async function loadDashboard() {
     payments.value = data.payments ?? [];
     serviceSlots.value = data.service_slots ?? [];
     stockMovements.value = data.stock_movements ?? [];
+    warehouseTasks.value = data.warehouse_tasks ?? [];
     auditLogs.value = data.audit_logs ?? [];
     salesRequests.value = data.sales_requests ?? [];
     serviceRequests.value = data.service_requests ?? [];
@@ -574,10 +627,32 @@ async function loadDashboard() {
     stats.value = data.stats;
     analytics.value = data.analytics ?? analytics.value;
     syncStockForms();
+    if (!canOpen(activeTab.value)) {
+      setActiveTab(visibleTabs.value[0]?.id ?? 'dashboard');
+    }
   } catch {
     errorText.value = 'Не удалось загрузить данные админ-панели.';
   } finally {
     loading.value = false;
+  }
+}
+
+async function updateWarehouseTaskStatus(task: WarehouseTask, status: WarehouseTask['status']) {
+  warehouseTaskSavingId.value = task.id;
+  errorText.value = '';
+  successText.value = '';
+
+  try {
+    const { data } = await api.patch(`/admin/warehouse-tasks/${task.id}/status`, {
+      status,
+      comment: task.comment,
+    });
+    successText.value = data.message;
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось обновить складскую задачу.';
+  } finally {
+    warehouseTaskSavingId.value = null;
   }
 }
 
@@ -833,15 +908,15 @@ onMounted(loadDashboard);
           </div>
 
           <div class="grid grid-cols-3 gap-2 w-full lg:w-auto">
-            <button type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="activeTab = 'orders'">
+            <button v-if="canOpen('orders')" type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="setActiveTab('orders')">
               <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Заказы в работе</span>
               <span class="text-2xl text-white font-display font-bold">{{ urgentOrders.length }}</span>
             </button>
-            <button type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="activeTab = 'sales'">
+            <button v-if="canOpen('sales')" type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="setActiveTab('sales')">
               <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Новые заявки</span>
               <span class="text-2xl text-primary font-display font-bold">{{ newSalesRequests.length }}</span>
             </button>
-            <button type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="activeTab = 'service'">
+            <button v-if="canOpen('service')" type="button" class="bg-dark border border-white/5 px-4 py-3 text-left" @click="setActiveTab('service')">
               <span class="block text-[10px] text-gray-600 font-bold uppercase tracking-wider">Новый сервис</span>
               <span class="text-2xl text-green-300 font-display font-bold">{{ newServiceRequests.length }}</span>
             </button>
@@ -891,12 +966,12 @@ onMounted(loadDashboard);
 
             <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-1 gap-2">
               <button
-                v-for="tab in tabs"
+                v-for="tab in visibleTabs"
                 :key="tab.id"
                 type="button"
                 class="flex items-center justify-between gap-3 border px-4 py-3 text-left transition-colors"
                 :class="activeTab === tab.id ? 'border-primary/60 bg-primary/10 text-primary' : 'border-white/5 bg-dark text-gray-400 hover:text-white hover:border-white/20'"
-                @click="activeTab = tab.id"
+                @click="setActiveTab(tab.id)"
               >
                 <span>
                   <span class="block text-sm font-bold uppercase tracking-wider">{{ tab.label }}</span>
@@ -906,7 +981,7 @@ onMounted(loadDashboard);
               </button>
             </div>
 
-            <button type="button" class="btn btn-primary w-full mt-4" @click="openCreateMotorcycleForm">
+            <button v-if="canOpen('products')" type="button" class="btn btn-primary w-full mt-4" @click="openCreateMotorcycleForm">
               <span>Добавить товар</span>
             </button>
           </section>
@@ -947,22 +1022,22 @@ onMounted(loadDashboard);
 
           <section v-show="activeTab === 'dashboard'" class="space-y-6">
             <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
-              <button type="button" class="admin-record text-left" @click="activeTab = 'orders'">
+              <button v-if="canOpen('orders')" type="button" class="admin-record text-left" @click="setActiveTab('orders')">
                 <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Заказы требуют действий</p>
                 <p class="text-4xl text-white font-display font-bold">{{ urgentOrders.length }}</p>
                 <p class="text-gray-500 text-sm mt-2">{{ readyOrders.length }} готовы к выдаче</p>
               </button>
-              <button type="button" class="admin-record text-left" @click="activeTab = 'sales'">
+              <button v-if="canOpen('sales')" type="button" class="admin-record text-left" @click="setActiveTab('sales')">
                 <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Новые заявки на покупку</p>
                 <p class="text-4xl text-primary font-display font-bold">{{ newSalesRequests.length }}</p>
                 <p class="text-gray-500 text-sm mt-2">нужно связаться с клиентом</p>
               </button>
-              <button type="button" class="admin-record text-left" @click="activeTab = 'service'">
+              <button v-if="canOpen('service')" type="button" class="admin-record text-left" @click="setActiveTab('service')">
                 <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Новые записи на сервис</p>
                 <p class="text-4xl text-green-300 font-display font-bold">{{ newServiceRequests.length }}</p>
                 <p class="text-gray-500 text-sm mt-2">нужно подтвердить дату</p>
               </button>
-              <button type="button" class="admin-record text-left" @click="activeTab = 'payments'">
+              <button v-if="canOpen('payments')" type="button" class="admin-record text-left" @click="setActiveTab('payments')">
                 <p class="text-gray-600 text-xs font-bold uppercase tracking-wider mb-2">Оплаты ожидают проверки</p>
                 <p class="text-4xl text-yellow-300 font-display font-bold">{{ pendingPayments.length }}</p>
                 <p class="text-gray-500 text-sm mt-2">{{ formatCurrency(stats.paidPaymentsTotal) }} оплачено</p>
@@ -1020,7 +1095,7 @@ onMounted(loadDashboard);
               <section class="bg-dark-lighter border border-white/5 overflow-hidden">
                 <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between">
                   <h3 class="text-xl font-display font-bold text-white uppercase">Очередь заказов</h3>
-                  <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="activeTab = 'orders'">Открыть</button>
+                  <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="setActiveTab('orders')">Открыть</button>
                 </div>
                 <div class="divide-y divide-white/5">
                   <article v-for="order in urgentOrders.slice(0, 5)" :key="order.id" class="p-4 flex items-center justify-between gap-4">
@@ -1037,7 +1112,7 @@ onMounted(loadDashboard);
               <section class="bg-dark-lighter border border-white/5 overflow-hidden">
                 <div class="px-5 py-4 border-b border-white/5 flex items-center justify-between">
                   <h3 class="text-xl font-display font-bold text-white uppercase">Новые обращения</h3>
-                  <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="activeTab = 'sales'">К заявкам</button>
+                  <button type="button" class="text-xs text-primary font-bold uppercase tracking-wider" @click="setActiveTab('sales')">К заявкам</button>
                 </div>
                 <div class="divide-y divide-white/5">
                   <article v-for="request in newSalesRequests.slice(0, 5)" :key="request.id" class="p-4 flex items-start justify-between gap-4">
@@ -1051,6 +1126,47 @@ onMounted(loadDashboard);
                 </div>
               </section>
             </div>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="px-5 py-4 border-b border-white/5">
+                <h3 class="text-xl font-display font-bold text-white uppercase">Складские задачи по заказам</h3>
+                <p class="text-gray-500 text-sm mt-1">Менеджер подтверждает заказ, после этого кладовщик готовит товар к выдаче.</p>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Задача</th>
+                      <th>Товар</th>
+                      <th>Кол-во</th>
+                      <th>Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="task in warehouseTasks" :key="task.id">
+                      <td>
+                        <p class="text-white font-display font-bold uppercase">Заказ #{{ task.order_id }}</p>
+                        <p class="text-gray-600 text-xs">{{ task.order?.name || task.order?.user?.name || 'клиент' }} · {{ formatDate(task.created_at) }}</p>
+                      </td>
+                      <td>
+                        <p class="text-gray-300 text-sm">{{ warehouseTaskLabel(task) }}</p>
+                        <p v-if="task.comment" class="text-gray-600 text-xs mt-1">{{ task.comment }}</p>
+                      </td>
+                      <td><span class="text-primary font-display font-bold text-lg">{{ task.quantity }}</span></td>
+                      <td>
+                        <div class="flex flex-col gap-2">
+                          <StatusBadge :status="task.status" />
+                          <select class="field-dark min-w-44" :value="task.status" :disabled="warehouseTaskSavingId === task.id" @change="updateWarehouseTaskStatus(task, ($event.target as HTMLSelectElement).value as WarehouseTask['status'])">
+                            <option v-for="option in warehouseTaskStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                          </select>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="!warehouseTasks.length" class="empty-panel">Пока нет задач для склада. Они появятся после подтверждения заказа менеджером.</div>
+            </section>
 
             <section class="bg-dark-lighter border border-white/5 overflow-hidden">
               <div class="px-5 py-4 border-b border-white/5">

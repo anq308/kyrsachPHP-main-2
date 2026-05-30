@@ -140,6 +140,21 @@ export interface StockMovement {
   created_at: string;
 }
 
+export interface WarehouseTask {
+  id: number;
+  order_id: number;
+  motorcycle_id: number | null;
+  assigned_user_id: number | null;
+  quantity: number;
+  status: 'new' | 'in_progress' | 'completed' | 'cancelled';
+  comment: string | null;
+  completed_at: string | null;
+  order?: Order | null;
+  motorcycle?: Motorcycle | null;
+  assigned_user?: User | null;
+  created_at: string;
+}
+
 export interface ServiceSlot {
   id: number;
   service_date: string;
@@ -170,6 +185,7 @@ export interface Order {
   pickup_point?: PickupPoint | null;
   reservations?: Reservation[];
   payments?: Payment[];
+  warehouse_tasks?: WarehouseTask[];
   user?: User | null;
   items: OrderItem[];
   created_at: string;

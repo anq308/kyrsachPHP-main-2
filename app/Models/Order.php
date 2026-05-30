@@ -56,6 +56,11 @@ class Order extends Model
         return $this->hasMany(Payment::class);
     }
 
+    public function warehouseTasks()
+    {
+        return $this->hasMany(WarehouseTask::class);
+    }
+
     public function latestPayment()
     {
         return $this->hasOne(Payment::class)->latestOfMany();

@@ -13,18 +13,20 @@ use App\Models\ServiceRequest;
 use App\Models\StockMovement;
 use App\Models\StatusHistory;
 use App\Models\User;
+use App\Models\WarehouseTask;
 
 class AdminDashboardService
 {
     public function payload(): array
     {
         $motorcycles = Motorcycle::latest()->get();
-        $orders = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle', 'payments'])->latest()->get();
+        $orders = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle', 'payments', 'warehouseTasks.motorcycle'])->latest()->get();
         $salesRequests = SalesRequest::with(['user', 'motorcycle'])->latest()->get();
         $serviceRequests = ServiceRequest::with(['user', 'serviceSlot'])->latest()->get();
         $payments = Payment::with(['order.user', 'user'])->latest()->get();
         $serviceSlots = ServiceSlot::latest('service_date')->get();
         $stockMovements = StockMovement::with(['motorcycle', 'user'])->latest()->take(50)->get();
+        $warehouseTasks = WarehouseTask::with(['order.user', 'motorcycle', 'assignedUser'])->latest()->get();
         $auditLogs = AuditLog::with('user')->latest()->take(50)->get();
         $messages = ContactMessage::latest()->get();
         $users = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest()->get();
@@ -38,6 +40,7 @@ class AdminDashboardService
             'payments' => $payments,
             'service_slots' => $serviceSlots,
             'stock_movements' => $stockMovements,
+            'warehouse_tasks' => $warehouseTasks,
             'audit_logs' => $auditLogs,
             'messages' => $messages,
             'users' => $users,
@@ -90,6 +93,8 @@ class AdminDashboardService
                 'reservedUnits' => $motorcycles->sum('reserved_quantity'),
                 'availableUnits' => $motorcycles->sum(fn ($motorcycle) => $motorcycle->availableStock()),
                 'lowStockCount' => $motorcycles->filter(fn ($motorcycle) => $motorcycle->availableStock() <= 1)->count(),
+                'warehouseTasksCount' => $warehouseTasks->count(),
+                'newWarehouseTasksCount' => $warehouseTasks->where('status', 'new')->count(),
             ],
         ];
     }

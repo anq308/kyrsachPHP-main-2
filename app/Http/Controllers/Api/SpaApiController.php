@@ -25,6 +25,7 @@ use App\Models\ServiceSlot;
 use App\Models\ServiceRequest;
 use App\Models\StockMovement;
 use App\Models\User;
+use App\Models\WarehouseTask;
 use App\Services\AdminDashboardService;
 use App\Services\AuditLogService;
 use App\Services\CartService;
@@ -329,6 +330,8 @@ class SpaApiController extends Controller
 
     public function adminSalesRequestsIndex(Request $request): JsonResponse
     {
+        $this->authorizeSalesWork($request);
+
         $query = SalesRequest::with(['user', 'motorcycle'])->latest();
 
         if ($request->filled('status') && in_array($request->input('status'), SalesRequest::STATUSES, true)) {
@@ -402,6 +405,8 @@ class SpaApiController extends Controller
 
     public function adminServiceRequestsIndex(Request $request): JsonResponse
     {
+        $this->authorizeServiceWork($request);
+
         $query = ServiceRequest::with(['user', 'serviceSlot'])->latest();
 
         if ($request->filled('status') && in_array($request->input('status'), ServiceRequest::STATUSES, true)) {
@@ -579,7 +584,9 @@ class SpaApiController extends Controller
 
     public function adminOrdersIndex(Request $request): JsonResponse
     {
-        $query = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle', 'payments'])->latest();
+        $this->authorizeSalesWork($request);
+
+        $query = Order::with(['items', 'user', 'pickupPoint', 'reservations.motorcycle', 'payments', 'warehouseTasks.motorcycle'])->latest();
 
         if ($request->filled('status') && in_array($request->input('status'), Order::STATUSES, true)) {
             $query->where('status', $request->input('status'));
@@ -610,6 +617,8 @@ class SpaApiController extends Controller
 
     public function adminAuditLogsIndex(Request $request): JsonResponse
     {
+        $this->authorizeAdminWork($request);
+
         $query = \App\Models\AuditLog::with('user')->latest();
 
         if ($request->filled('action')) {
@@ -635,6 +644,8 @@ class SpaApiController extends Controller
 
     public function adminCustomerShow(string $id): JsonResponse
     {
+        $this->authorizeSalesWork(request());
+
         $customer = User::with([
             'orders.items',
             'orders.payments',
@@ -657,6 +668,8 @@ class SpaApiController extends Controller
 
     public function adminStockMovementsIndex(Request $request): JsonResponse
     {
+        $this->authorizeWarehouseWork($request);
+
         $query = StockMovement::with(['motorcycle', 'user'])->latest();
 
         if ($request->filled('type') && in_array($request->input('type'), StockMovement::TYPES, true)) {
@@ -674,6 +687,8 @@ class SpaApiController extends Controller
 
     public function adminPaymentsIndex(Request $request): JsonResponse
     {
+        $this->authorizeSalesWork($request);
+
         $query = Payment::with(['order.user', 'user'])->latest();
 
         if ($request->filled('status') && in_array($request->input('status'), Payment::STATUSES, true)) {
@@ -709,6 +724,8 @@ class SpaApiController extends Controller
 
     public function adminStoreServiceSlot(Request $request): JsonResponse
     {
+        $this->authorizeServiceWork($request);
+
         $validated = $this->validateServiceSlot($request);
         $slot = ServiceSlot::create($validated);
         $this->auditLogService->record('service_slot_created', $slot, $request->user(), 'Создан слот записи на сервис.', null, $slot->toArray());
@@ -721,6 +738,8 @@ class SpaApiController extends Controller
 
     public function adminUpdateServiceSlot(Request $request, string $id): JsonResponse
     {
+        $this->authorizeServiceWork($request);
+
         $slot = ServiceSlot::findOrFail($id);
         $before = $slot->only(['service_date', 'starts_at', 'ends_at', 'service_type', 'capacity', 'booked_count', 'status', 'comment']);
         $validated = $this->validateServiceSlot($request);
@@ -742,6 +761,8 @@ class SpaApiController extends Controller
 
     public function adminDeleteServiceSlot(Request $request, string $id): JsonResponse
     {
+        $this->authorizeServiceWork($request);
+
         $slot = ServiceSlot::findOrFail($id);
 
         if ($slot->serviceRequests()->exists()) {
@@ -761,6 +782,8 @@ class SpaApiController extends Controller
 
     public function adminUsersIndex(Request $request): JsonResponse
     {
+        $this->authorizeAdminWork($request);
+
         $query = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest();
 
         if ($request->filled('role') && in_array($request->input('role'), User::ROLES, true)) {
@@ -782,6 +805,8 @@ class SpaApiController extends Controller
 
     public function adminStoreMotorcycle(StoreMotorcycleRequest $request): JsonResponse
     {
+        $this->authorizeWarehouseWork($request);
+
         $validated = $request->validated();
         $validated['stock_quantity'] = (int) ($validated['stock_quantity'] ?? 1);
         $validated['reserved_quantity'] = min((int) ($validated['reserved_quantity'] ?? 0), $validated['stock_quantity']);
@@ -798,6 +823,8 @@ class SpaApiController extends Controller
 
     public function adminUpdateMotorcycle(StoreMotorcycleRequest $request, string $id): JsonResponse
     {
+        $this->authorizeWarehouseWork($request);
+
         $validated = $request->validated();
         $validated['stock_quantity'] = (int) ($validated['stock_quantity'] ?? 1);
         $validated['reserved_quantity'] = min((int) ($validated['reserved_quantity'] ?? 0), $validated['stock_quantity']);
@@ -815,6 +842,8 @@ class SpaApiController extends Controller
 
     public function adminUpdateMotorcycleStock(Request $request, string $id): JsonResponse
     {
+        $this->authorizeWarehouseWork($request);
+
         $validated = $request->validate([
             'stock_quantity' => ['required', 'integer', 'min:0'],
             'reserved_quantity' => ['required', 'integer', 'min:0'],
@@ -856,8 +885,57 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminDeleteMotorcycle(string $id): JsonResponse
+    public function adminUpdateWarehouseTaskStatus(Request $request, string $id): JsonResponse
     {
+        $this->authorizeWarehouseWork($request);
+
+        $validated = $request->validate([
+            'status' => ['required', 'in:'.implode(',', WarehouseTask::STATUSES)],
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $task = WarehouseTask::with(['order.warehouseTasks', 'motorcycle'])->findOrFail($id);
+        $before = $task->only(['status', 'assigned_user_id', 'comment', 'completed_at']);
+
+        $task->forceFill([
+            'status' => $validated['status'],
+            'assigned_user_id' => $request->user()?->id,
+            'comment' => $validated['comment'] ?? $task->comment,
+            'completed_at' => $validated['status'] === 'completed' ? now() : null,
+        ])->save();
+
+        if ($task->motorcycle && $validated['status'] === 'completed') {
+            StockMovement::create([
+                'motorcycle_id' => $task->motorcycle_id,
+                'user_id' => $request->user()?->id,
+                'type' => 'reservation',
+                'quantity' => 0,
+                'stock_before' => $task->motorcycle->stock_quantity,
+                'stock_after' => $task->motorcycle->stock_quantity,
+                'reserved_before' => $task->motorcycle->reserved_quantity,
+                'reserved_after' => $task->motorcycle->reserved_quantity,
+                'reason' => "Товар подготовлен к выдаче по заказу #{$task->order_id}",
+            ]);
+        }
+
+        $task->refresh();
+        $this->auditLogService->record('warehouse_task_updated', $task, $request->user(), 'Кладовщик обновил задачу по заказу.', $before, $task->only(['status', 'assigned_user_id', 'comment', 'completed_at']));
+
+        $order = $task->order?->fresh(['warehouseTasks', 'items', 'pickupPoint', 'reservations.motorcycle', 'payments']);
+        if ($order && $order->warehouseTasks->isNotEmpty() && $order->warehouseTasks->every(fn (WarehouseTask $warehouseTask) => $warehouseTask->status === 'completed') && ! in_array($order->status, ['ready_for_pickup', 'completed', 'cancelled'], true)) {
+            $this->orderLifecycleService->updateStatus($order, 'ready_for_pickup', $request->user(), null, 'Склад подготовил товар к выдаче.');
+        }
+
+        return response()->json([
+            'message' => 'Складская задача обновлена.',
+            'warehouse_task' => $task->fresh(['order.user', 'motorcycle', 'assignedUser']),
+        ]);
+    }
+
+    public function adminDeleteMotorcycle(Request $request, string $id): JsonResponse
+    {
+        $this->authorizeWarehouseWork($request);
+
         $motorcycle = Motorcycle::findOrFail($id);
         $motorcycle->delete();
 
@@ -868,6 +946,8 @@ class SpaApiController extends Controller
 
     public function adminUpdateOrderStatus(UpdateOrderStatusRequest $request, string $id): JsonResponse
     {
+        $this->authorizeSalesWork($request);
+
         $order = Order::findOrFail($id);
         $oldStatus = $order->status;
         $order = $this->orderLifecycleService->updateStatus(
@@ -879,6 +959,10 @@ class SpaApiController extends Controller
         );
         $this->auditLogService->record('order_status_updated', $order, $request->user(), 'Изменён статус заказа.', ['status' => $oldStatus], ['status' => $order->status]);
 
+        if ($order->status === 'approved') {
+            $this->createWarehouseTasksForOrder($order, $request->user());
+        }
+
         return response()->json([
             'message' => 'Статус заказа #'.$order->id.' обновлён.',
             'order' => $order,
@@ -887,6 +971,8 @@ class SpaApiController extends Controller
 
     public function adminUpdatePaymentStatus(Request $request, string $id): JsonResponse
     {
+        $this->authorizeSalesWork($request);
+
         $validated = $request->validate([
             'status' => ['required', 'in:'.implode(',', Payment::STATUSES)],
             'transaction_id' => ['nullable', 'string', 'max:255'],
@@ -923,6 +1009,8 @@ class SpaApiController extends Controller
 
     public function adminUpdateSalesRequestStatus(UpdateSalesRequestStatusRequest $request, string $id): JsonResponse
     {
+        $this->authorizeSalesWork($request);
+
         $salesRequest = SalesRequest::findOrFail($id);
         $oldStatus = $salesRequest->status;
         $salesRequest->update(['status' => $request->input('status')]);
@@ -937,8 +1025,10 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminDeleteSalesRequest(string $id): JsonResponse
+    public function adminDeleteSalesRequest(Request $request, string $id): JsonResponse
     {
+        $this->authorizeSalesWork($request);
+
         $salesRequest = SalesRequest::findOrFail($id);
         $salesRequest->delete();
 
@@ -949,6 +1039,8 @@ class SpaApiController extends Controller
 
     public function adminUpdateServiceRequestStatus(UpdateServiceRequestStatusRequest $request, string $id): JsonResponse
     {
+        $this->authorizeServiceWork($request);
+
         $serviceRequest = ServiceRequest::findOrFail($id);
         $oldStatus = $serviceRequest->status;
         $serviceRequest->update(['status' => $request->input('status')]);
@@ -963,8 +1055,10 @@ class SpaApiController extends Controller
         ]);
     }
 
-    public function adminDeleteServiceRequest(string $id): JsonResponse
+    public function adminDeleteServiceRequest(Request $request, string $id): JsonResponse
     {
+        $this->authorizeServiceWork($request);
+
         $serviceRequest = ServiceRequest::findOrFail($id);
         $serviceRequest->delete();
 
@@ -975,6 +1069,8 @@ class SpaApiController extends Controller
 
     public function adminUpdateUserRole(UpdateUserRoleRequest $request, string $id): JsonResponse
     {
+        $this->authorizeAdminWork($request);
+
         $user = User::findOrFail($id);
 
         if ($user->id === $request->user()->id && $request->input('role') !== User::ROLE_ADMIN) {
@@ -1014,6 +1110,53 @@ class SpaApiController extends Controller
             'can_manage_warehouse' => $user->canManageWarehouse(),
             'created_at' => optional($user->created_at)?->toISOString(),
         ];
+    }
+
+    private function authorizeSalesWork(Request $request): void
+    {
+        abort_unless($request->user()?->canManageSales(), 403, 'Эта задача доступна менеджеру продаж или администратору.');
+    }
+
+    private function authorizeServiceWork(Request $request): void
+    {
+        abort_unless($request->user()?->canManageService(), 403, 'Эта задача доступна менеджеру сервиса или администратору.');
+    }
+
+    private function authorizeWarehouseWork(Request $request): void
+    {
+        abort_unless($request->user()?->canManageWarehouse(), 403, 'Эта задача доступна кладовщику или администратору.');
+    }
+
+    private function authorizeAdminWork(Request $request): void
+    {
+        abort_unless($request->user()?->isAdmin(), 403, 'Эта задача доступна только администратору.');
+    }
+
+    private function createWarehouseTasksForOrder(Order $order, ?User $manager = null): void
+    {
+        $order->loadMissing('items');
+
+        foreach ($order->items as $item) {
+            if (! $item->motorcycle_id) {
+                continue;
+            }
+
+            $task = WarehouseTask::firstOrCreate(
+                [
+                    'order_id' => $order->id,
+                    'motorcycle_id' => $item->motorcycle_id,
+                ],
+                [
+                    'quantity' => $item->quantity,
+                    'status' => 'new',
+                    'comment' => 'Подготовить товар к выдаче после подтверждения заказа менеджером.',
+                ],
+            );
+
+            if ($task->wasRecentlyCreated) {
+                $this->auditLogService->record('warehouse_task_created', $task, $manager, 'Создана задача кладовщику после подтверждения заказа.', null, $task->toArray());
+            }
+        }
     }
 
     private function validateServiceSlot(Request $request): array

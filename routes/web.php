@@ -51,6 +51,7 @@ Route::prefix('api')->group(function () {
         Route::get('/orders', [SpaApiController::class, 'adminOrdersIndex']);
         Route::get('/payments', [SpaApiController::class, 'adminPaymentsIndex']);
         Route::get('/stock-movements', [SpaApiController::class, 'adminStockMovementsIndex']);
+        Route::patch('/warehouse-tasks/{id}/status', [SpaApiController::class, 'adminUpdateWarehouseTaskStatus']);
         Route::post('/service-slots', [SpaApiController::class, 'adminStoreServiceSlot']);
         Route::patch('/service-slots/{id}', [SpaApiController::class, 'adminUpdateServiceSlot']);
         Route::delete('/service-slots/{id}', [SpaApiController::class, 'adminDeleteServiceSlot']);

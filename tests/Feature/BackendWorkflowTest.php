@@ -12,6 +12,7 @@ use App\Models\ServiceSlot;
 use App\Models\ServiceRequest;
 use App\Models\StockMovement;
 use App\Models\User;
+use App\Models\WarehouseTask;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -124,6 +125,38 @@ class BackendWorkflowTest extends TestCase
             ->patchJson("/api/admin/users/{$user->id}/role", [
                 'role' => User::ROLE_ADMIN,
             ])
+            ->assertForbidden();
+    }
+
+    public function test_specialized_roles_only_access_their_work_area(): void
+    {
+        $salesManager = User::factory()->create(['role' => User::ROLE_SALES_MANAGER]);
+        $warehouseManager = User::factory()->create(['role' => User::ROLE_WAREHOUSE_MANAGER]);
+        $motorcycle = Motorcycle::factory()->create([
+            'stock_quantity' => 2,
+            'reserved_quantity' => 0,
+        ]);
+
+        $this->actingAs($salesManager)
+            ->getJson('/api/admin/payments')
+            ->assertOk();
+
+        $this->actingAs($salesManager)
+            ->patchJson("/api/admin/motorcycles/{$motorcycle->id}/stock", [
+                'stock_quantity' => 3,
+                'reserved_quantity' => 0,
+            ])
+            ->assertForbidden();
+
+        $this->actingAs($warehouseManager)
+            ->patchJson("/api/admin/motorcycles/{$motorcycle->id}/stock", [
+                'stock_quantity' => 3,
+                'reserved_quantity' => 0,
+            ])
+            ->assertOk();
+
+        $this->actingAs($warehouseManager)
+            ->getJson('/api/admin/payments')
             ->assertForbidden();
     }
 
@@ -325,6 +358,19 @@ class BackendWorkflowTest extends TestCase
             'title' => 'Заказ подтверждён',
             'is_read' => false,
         ]);
+        $task = WarehouseTask::where('order_id', $order->id)->firstOrFail();
+        $this->assertSame('new', $task->status);
+
+        $warehouseManager = User::factory()->create(['role' => User::ROLE_WAREHOUSE_MANAGER]);
+        $this->actingAs($warehouseManager)
+            ->patchJson("/api/admin/warehouse-tasks/{$task->id}/status", [
+                'status' => 'completed',
+                'comment' => 'Товар проверен и подготовлен к выдаче.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('warehouse_task.status', 'completed');
+
+        $this->assertSame('ready_for_pickup', $order->fresh()->status);
 
         $this->actingAs($admin)
             ->patchJson("/api/admin/orders/{$order->id}/status", [
@@ -339,7 +385,7 @@ class BackendWorkflowTest extends TestCase
         $this->assertDatabaseHas('status_histories', [
             'entity_type' => Order::class,
             'entity_id' => $order->id,
-            'old_status' => 'approved',
+            'old_status' => 'ready_for_pickup',
             'new_status' => 'cancelled',
             'user_id' => $admin->id,
             'comment' => 'Клиент отказался от покупки.',
