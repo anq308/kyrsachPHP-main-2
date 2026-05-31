@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import api from '../api';
 import StatusBadge from '../components/ui/StatusBadge.vue';
 import { sessionState } from '../session';
-import type { AuditLog, ContactMessage, Motorcycle, Order, Payment, SalesRequest, ServiceRequest, ServiceSlot, StatusHistory, StockMovement, User, WarehouseTask } from '../types';
+import type { AuditLog, ContactMessage, InventoryReceipt, Motorcycle, Order, Payment, SalesRequest, ServiceRequest, ServiceSlot, StaffNote, StatusHistory, StockMovement, User, WarehouseTask } from '../types';
 
 interface DashboardStats {
   usersCount: number;
@@ -24,6 +24,8 @@ interface DashboardStats {
   lowStockCount: number;
   warehouseTasksCount: number;
   newWarehouseTasksCount: number;
+  inventoryReceiptsCount: number;
+  plannedInventoryReceiptsCount: number;
 }
 
 interface AdminUser extends User {
@@ -63,6 +65,8 @@ const statusCommentSaving = ref(false);
 const stockSavingId = ref<number | null>(null);
 const warehouseTaskSavingId = ref<number | null>(null);
 const slotSaving = ref(false);
+const receiptSaving = ref(false);
+const staffNoteSavingKey = ref('');
 const selectedCustomerId = ref<number | null>(null);
 const pendingStatusAction = ref<{
   title: string;
@@ -77,6 +81,8 @@ const payments = ref<Payment[]>([]);
 const serviceSlots = ref<ServiceSlot[]>([]);
 const stockMovements = ref<StockMovement[]>([]);
 const warehouseTasks = ref<WarehouseTask[]>([]);
+const inventoryReceipts = ref<InventoryReceipt[]>([]);
+const staffNotes = ref<StaffNote[]>([]);
 const auditLogs = ref<AuditLog[]>([]);
 const salesRequests = ref<SalesRequest[]>([]);
 const serviceRequests = ref<ServiceRequest[]>([]);
@@ -102,6 +108,8 @@ const stats = ref<DashboardStats>({
   lowStockCount: 0,
   warehouseTasksCount: 0,
   newWarehouseTasksCount: 0,
+  inventoryReceiptsCount: 0,
+  plannedInventoryReceiptsCount: 0,
 });
 const analytics = ref<DashboardAnalytics>({
   monthlyRevenue: 0,
@@ -113,6 +121,16 @@ const analytics = ref<DashboardAnalytics>({
 
 const editingId = ref<number | null>(null);
 const stockForms = reactive<Record<number, { stock_quantity: number; reserved_quantity: number; reason: string }>>({});
+const staffNoteDrafts = reactive<Record<string, string>>({});
+const receiptForm = reactive({
+  motorcycle_id: null as number | null,
+  supplier_name: '',
+  quantity: 1,
+  unit_cost: 0,
+  status: 'planned' as InventoryReceipt['status'],
+  expected_at: new Date().toISOString().slice(0, 10),
+  comment: '',
+});
 const slotForm = reactive({
   service_date: new Date().toISOString().slice(0, 10),
   starts_at: '10:00',
@@ -228,6 +246,12 @@ const serviceSlotStatusOptions: Array<{ value: ServiceSlot['status']; label: str
   { value: 'closed', label: 'Закрыт' },
 ];
 
+const inventoryReceiptStatusOptions: Array<{ value: InventoryReceipt['status']; label: string }> = [
+  { value: 'planned', label: 'Ожидается' },
+  { value: 'received', label: 'Принята' },
+  { value: 'cancelled', label: 'Отменена' },
+];
+
 const allowedTabIds = computed<AdminTab[]>(() => {
   const user = sessionState.user;
 
@@ -258,6 +282,7 @@ const activeTabMeta = computed(() => visibleTabs.value.find((tab) => tab.id === 
 const urgentOrders = computed(() => orders.value.filter((order) => ['new', 'processing', 'approved'].includes(order.status)));
 const readyOrders = computed(() => orders.value.filter((order) => order.status === 'ready_for_pickup'));
 const openWarehouseTasks = computed(() => warehouseTasks.value.filter((task) => ['new', 'in_progress'].includes(task.status)));
+const plannedReceipts = computed(() => inventoryReceipts.value.filter((receipt) => receipt.status === 'planned'));
 const pendingPayments = computed(() => payments.value.filter((payment) => payment.status === 'pending'));
 const paidPayments = computed(() => payments.value.filter((payment) => payment.status === 'paid'));
 const availableServiceSlots = computed(() => serviceSlots.value.filter((slot) => slot.status === 'available'));
@@ -322,7 +347,7 @@ function tabCount(tab: AdminTab): number {
     dashboard: urgentOrders.value.length + newSalesRequests.value.length + newServiceRequests.value.length,
     orders: orders.value.length,
     payments: payments.value.length,
-    warehouse: openWarehouseTasks.value.length + lowStockMotorcycles.value.length,
+    warehouse: openWarehouseTasks.value.length + lowStockMotorcycles.value.length + plannedReceipts.value.length,
     schedule: availableServiceSlots.value.length,
     sales: salesRequests.value.length,
     service: serviceRequests.value.length,
@@ -411,6 +436,47 @@ function slotLabel(slot: ServiceSlot): string {
 
 function warehouseTaskLabel(task: WarehouseTask): string {
   return task.motorcycle ? `${task.motorcycle.brand} ${task.motorcycle.model}` : `Товар #${task.motorcycle_id ?? 'не указан'}`;
+}
+
+function receiptStatusLabel(status: InventoryReceipt['status']): string {
+  return inventoryReceiptStatusOptions.find((option) => option.value === status)?.label ?? status;
+}
+
+function noteKey(entityType: string, entityId: number): string {
+  return `${entityType}:${entityId}`;
+}
+
+function entityClassFragment(entityType: string): string {
+  switch (entityType) {
+    case 'order':
+      return 'Order';
+    case 'sales_request':
+      return 'SalesRequest';
+    case 'service_request':
+      return 'ServiceRequest';
+    case 'warehouse_task':
+      return 'WarehouseTask';
+    case 'motorcycle':
+      return 'Motorcycle';
+    case 'customer':
+      return 'User';
+    default:
+      return entityType;
+  }
+}
+
+function staffNotesFor(entityType: string, entityId: number): StaffNote[] {
+  const fragment = entityClassFragment(entityType);
+
+  return staffNotes.value.filter((note) => note.noteable_id === entityId && note.noteable_type.includes(fragment));
+}
+
+function staffNoteDraft(entityType: string, entityId: number): string {
+  return staffNoteDrafts[noteKey(entityType, entityId)] ?? '';
+}
+
+function setStaffNoteDraft(entityType: string, entityId: number, value: string) {
+  staffNoteDrafts[noteKey(entityType, entityId)] = value;
 }
 
 function auditEntityLabel(log: AuditLog): string {
@@ -618,6 +684,8 @@ async function loadDashboard() {
     serviceSlots.value = data.service_slots ?? [];
     stockMovements.value = data.stock_movements ?? [];
     warehouseTasks.value = data.warehouse_tasks ?? [];
+    inventoryReceipts.value = data.inventory_receipts ?? [];
+    staffNotes.value = data.staff_notes ?? [];
     auditLogs.value = data.audit_logs ?? [];
     salesRequests.value = data.sales_requests ?? [];
     serviceRequests.value = data.service_requests ?? [];
@@ -634,6 +702,82 @@ async function loadDashboard() {
     errorText.value = 'Не удалось загрузить данные админ-панели.';
   } finally {
     loading.value = false;
+  }
+}
+
+async function saveStaffNote(entityType: string, entityId: number) {
+  const key = noteKey(entityType, entityId);
+  const body = (staffNoteDrafts[key] ?? '').trim();
+
+  if (!body) {
+    return;
+  }
+
+  staffNoteSavingKey.value = key;
+  errorText.value = '';
+  successText.value = '';
+
+  try {
+    const { data } = await api.post('/admin/staff-notes', {
+      entity_type: entityType,
+      entity_id: entityId,
+      body,
+    });
+    staffNoteDrafts[key] = '';
+    successText.value = data.message;
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось сохранить внутренний комментарий.';
+  } finally {
+    staffNoteSavingKey.value = '';
+  }
+}
+
+async function saveInventoryReceipt() {
+  if (!receiptForm.motorcycle_id) {
+    errorText.value = 'Выберите товар для поступления.';
+
+    return;
+  }
+
+  receiptSaving.value = true;
+  errorText.value = '';
+  successText.value = '';
+
+  try {
+    const { data } = await api.post('/admin/inventory-receipts', {
+      ...receiptForm,
+      unit_cost: Number(receiptForm.unit_cost || 0),
+      comment: receiptForm.comment || null,
+      expected_at: receiptForm.expected_at || null,
+    });
+    successText.value = data.message;
+    receiptForm.supplier_name = '';
+    receiptForm.quantity = 1;
+    receiptForm.unit_cost = 0;
+    receiptForm.status = 'planned';
+    receiptForm.comment = '';
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось сохранить поступление.';
+  } finally {
+    receiptSaving.value = false;
+  }
+}
+
+async function updateInventoryReceiptStatus(receipt: InventoryReceipt, status: InventoryReceipt['status']) {
+  errorText.value = '';
+  successText.value = '';
+
+  try {
+    const { data } = await api.patch(`/admin/inventory-receipts/${receipt.id}/status`, {
+      status,
+      comment: receipt.comment,
+    });
+    successText.value = data.message;
+    await loadDashboard();
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message ?? 'Не удалось обновить поставку.';
   }
 }
 
@@ -1241,6 +1385,34 @@ onMounted(loadDashboard);
                     <span class="text-white font-display font-bold">{{ formatCurrency(item.price * item.quantity) }}</span>
                   </div>
                 </div>
+
+                <div class="mt-5 bg-dark border border-white/5 p-4">
+                  <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
+                    <div>
+                      <p class="text-xs text-gray-600 font-bold uppercase tracking-wider">Внутренние комментарии</p>
+                      <p class="text-gray-500 text-sm">Заметки менеджера и склада по этому заказу видны только сотрудникам.</p>
+                    </div>
+                    <span class="text-gray-600 text-xs">{{ staffNotesFor('order', order.id).length }} записей</span>
+                  </div>
+                  <div class="space-y-2 mb-3">
+                    <article v-for="note in staffNotesFor('order', order.id).slice(0, 3)" :key="note.id" class="border border-white/5 bg-black/20 p-3">
+                      <p class="text-gray-300 text-sm">{{ note.body }}</p>
+                      <p class="text-gray-600 text-xs mt-1">{{ note.user?.name || 'Сотрудник' }} · {{ formatDate(note.created_at) }}</p>
+                    </article>
+                    <p v-if="!staffNotesFor('order', order.id).length" class="text-gray-600 text-sm">Комментариев пока нет.</p>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                    <input
+                      class="field-dark"
+                      placeholder="Например: клиент просит звонить после 18:00"
+                      :value="staffNoteDraft('order', order.id)"
+                      @input="setStaffNoteDraft('order', order.id, ($event.target as HTMLInputElement).value)"
+                    />
+                    <button type="button" class="filter-chip" :disabled="staffNoteSavingKey === noteKey('order', order.id)" @click="saveStaffNote('order', order.id)">
+                      {{ staffNoteSavingKey === noteKey('order', order.id) ? 'Сохранение...' : 'Добавить' }}
+                    </button>
+                  </div>
+                </div>
               </div>
             </article>
             <div v-if="!orders.length" class="empty-panel">Заказов пока нет.</div>
@@ -1328,6 +1500,75 @@ onMounted(loadDashboard);
                 <p class="text-3xl text-primary font-display font-bold">{{ lowStockMotorcycles.length }}</p>
               </div>
             </div>
+
+            <form class="bg-dark-lighter border border-white/5 p-5" @submit.prevent="saveInventoryReceipt">
+              <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
+                <div>
+                  <h3 class="text-xl font-display font-bold text-white uppercase">Поступление техники</h3>
+                  <p class="text-gray-500 text-sm">Кладовщик фиксирует поставщика, количество и принимает товар на склад.</p>
+                </div>
+                <button type="submit" class="btn btn-primary" :disabled="receiptSaving"><span>{{ receiptSaving ? 'Сохранение...' : 'Сохранить поставку' }}</span></button>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+                <select v-model.number="receiptForm.motorcycle_id" class="field-dark xl:col-span-2" required>
+                  <option :value="null" disabled>Выберите модель</option>
+                  <option v-for="motorcycle in motorcycles" :key="motorcycle.id" :value="motorcycle.id">{{ motorcycle.brand }} {{ motorcycle.model }}</option>
+                </select>
+                <input v-model="receiptForm.supplier_name" class="field-dark xl:col-span-2" placeholder="Поставщик" required />
+                <input v-model.number="receiptForm.quantity" type="number" min="1" class="field-dark" placeholder="Кол-во" required />
+                <input v-model.number="receiptForm.unit_cost" type="number" min="0" class="field-dark" placeholder="Закупочная цена" />
+                <input v-model="receiptForm.expected_at" type="date" class="field-dark" />
+                <select v-model="receiptForm.status" class="field-dark">
+                  <option v-for="option in inventoryReceiptStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+                <input v-model="receiptForm.comment" class="field-dark md:col-span-2 xl:col-span-4" placeholder="Комментарий: накладная, условия, ответственный..." />
+              </div>
+            </form>
+
+            <section class="bg-dark-lighter border border-white/5 overflow-hidden">
+              <div class="px-5 py-4 border-b border-white/5">
+                <h3 class="text-xl font-display font-bold text-white uppercase">Поставки</h3>
+                <p class="text-gray-500 text-sm mt-1">Планируемые и принятые поступления, которые формируют складской остаток.</p>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Поставка</th>
+                      <th>Товар</th>
+                      <th>Кол-во</th>
+                      <th>Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="receipt in inventoryReceipts" :key="receipt.id">
+                      <td>
+                        <p class="text-white font-display font-bold uppercase">#{{ receipt.id }} · {{ receipt.supplier_name }}</p>
+                        <p class="text-gray-600 text-xs">ожидается: {{ receipt.expected_at ? new Date(receipt.expected_at).toLocaleDateString('ru-RU') : 'не указано' }}</p>
+                      </td>
+                      <td>
+                        <p class="text-gray-300 text-sm">{{ receipt.motorcycle ? `${receipt.motorcycle.brand} ${receipt.motorcycle.model}` : `Товар #${receipt.motorcycle_id}` }}</p>
+                        <p v-if="receipt.comment" class="text-gray-600 text-xs mt-1">{{ receipt.comment }}</p>
+                      </td>
+                      <td>
+                        <span class="text-primary font-display font-bold text-lg">{{ receipt.quantity }}</span>
+                        <p class="text-gray-600 text-xs">{{ formatCurrency(receipt.unit_cost) }} / ед.</p>
+                      </td>
+                      <td>
+                        <div class="flex flex-col gap-2">
+                          <span class="text-xs font-bold uppercase tracking-wider" :class="receipt.status === 'received' ? 'text-green-300' : receipt.status === 'cancelled' ? 'text-red-300' : 'text-yellow-300'">{{ receiptStatusLabel(receipt.status) }}</span>
+                          <select class="field-dark min-w-40" :value="receipt.status" @change="updateInventoryReceiptStatus(receipt, ($event.target as HTMLSelectElement).value as InventoryReceipt['status'])">
+                            <option v-for="option in inventoryReceiptStatusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                          </select>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="!inventoryReceipts.length" class="empty-panel">Поставок пока нет. Создайте поступление, чтобы склад видел источник товара.</div>
+            </section>
 
             <section class="bg-dark-lighter border border-white/5 overflow-hidden">
               <div class="px-5 py-4 border-b border-white/5">
@@ -1479,6 +1720,20 @@ onMounted(loadDashboard);
                 <p class="text-gray-300 font-medium">{{ request.motorcycle ? `${request.motorcycle.brand} ${request.motorcycle.model}` : 'Подбор техники' }}</p>
                 <p class="text-gray-500 text-sm mt-1">{{ request.name }} · {{ request.phone }} · {{ request.email || 'email не указан' }}</p>
                 <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
+                <div class="mt-4 border border-white/5 bg-dark p-3">
+                  <p class="text-gray-600 text-xs uppercase font-bold mb-2">Заметки менеджера</p>
+                  <p v-for="note in staffNotesFor('sales_request', request.id).slice(0, 2)" :key="note.id" class="text-gray-400 text-sm mb-1">{{ note.body }}</p>
+                  <p v-if="!staffNotesFor('sales_request', request.id).length" class="text-gray-600 text-sm mb-2">Нет внутренних заметок.</p>
+                  <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mt-2">
+                    <input
+                      class="field-dark"
+                      placeholder="Что важно учесть по клиенту"
+                      :value="staffNoteDraft('sales_request', request.id)"
+                      @input="setStaffNoteDraft('sales_request', request.id, ($event.target as HTMLInputElement).value)"
+                    />
+                    <button type="button" class="filter-chip" :disabled="staffNoteSavingKey === noteKey('sales_request', request.id)" @click="saveStaffNote('sales_request', request.id)">Добавить</button>
+                  </div>
+                </div>
                 <div class="flex gap-2 mt-5">
                   <select class="field-dark flex-1" :value="request.status" @change="requestSalesStatusUpdate(request, $event.target as HTMLSelectElement)">
                     <option value="new">Новая</option>
@@ -1517,6 +1772,20 @@ onMounted(loadDashboard);
                 <p class="text-gray-500 text-sm mt-2">Желаемая дата: {{ request.preferred_date ? new Date(request.preferred_date).toLocaleDateString('ru-RU') : 'не указана' }}</p>
                 <p v-if="request.service_slot" class="text-gray-500 text-sm mt-2">Слот: {{ slotLabel(request.service_slot) }}</p>
                 <p v-if="request.comment" class="text-gray-500 text-sm mt-3">{{ request.comment }}</p>
+                <div class="mt-4 border border-white/5 bg-dark p-3">
+                  <p class="text-gray-600 text-xs uppercase font-bold mb-2">Заметки сервиса</p>
+                  <p v-for="note in staffNotesFor('service_request', request.id).slice(0, 2)" :key="note.id" class="text-gray-400 text-sm mb-1">{{ note.body }}</p>
+                  <p v-if="!staffNotesFor('service_request', request.id).length" class="text-gray-600 text-sm mb-2">Нет внутренних заметок.</p>
+                  <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mt-2">
+                    <input
+                      class="field-dark"
+                      placeholder="Что нужно учесть мастеру"
+                      :value="staffNoteDraft('service_request', request.id)"
+                      @input="setStaffNoteDraft('service_request', request.id, ($event.target as HTMLInputElement).value)"
+                    />
+                    <button type="button" class="filter-chip" :disabled="staffNoteSavingKey === noteKey('service_request', request.id)" @click="saveStaffNote('service_request', request.id)">Добавить</button>
+                  </div>
+                </div>
                 <div class="flex gap-2 mt-5">
                   <select class="field-dark flex-1" :value="request.status" @change="requestServiceStatusUpdate(request, $event.target as HTMLSelectElement)">
                     <option value="new">Новая</option>

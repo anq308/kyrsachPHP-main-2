@@ -65,4 +65,9 @@ class Order extends Model
     {
         return $this->hasOne(Payment::class)->latestOfMany();
     }
+
+    public function staffNotes()
+    {
+        return $this->morphMany(StaffNote::class, 'noteable');
+    }
 }

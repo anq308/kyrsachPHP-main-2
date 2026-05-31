@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ContactMessage;
 use App\Models\AuditLog;
+use App\Models\InventoryReceipt;
 use App\Models\Motorcycle;
 use App\Models\Order;
 use App\Models\Payment;
@@ -12,6 +13,7 @@ use App\Models\ServiceSlot;
 use App\Models\ServiceRequest;
 use App\Models\StockMovement;
 use App\Models\StatusHistory;
+use App\Models\StaffNote;
 use App\Models\User;
 use App\Models\WarehouseTask;
 
@@ -27,6 +29,8 @@ class AdminDashboardService
         $serviceSlots = ServiceSlot::latest('service_date')->get();
         $stockMovements = StockMovement::with(['motorcycle', 'user'])->latest()->take(50)->get();
         $warehouseTasks = WarehouseTask::with(['order.user', 'motorcycle', 'assignedUser'])->latest()->get();
+        $inventoryReceipts = InventoryReceipt::with(['motorcycle', 'user'])->latest()->get();
+        $staffNotes = StaffNote::with('user')->latest()->take(50)->get();
         $auditLogs = AuditLog::with('user')->latest()->take(50)->get();
         $messages = ContactMessage::latest()->get();
         $users = User::with(['orders', 'salesRequests', 'serviceRequests'])->latest()->get();
@@ -41,6 +45,8 @@ class AdminDashboardService
             'service_slots' => $serviceSlots,
             'stock_movements' => $stockMovements,
             'warehouse_tasks' => $warehouseTasks,
+            'inventory_receipts' => $inventoryReceipts,
+            'staff_notes' => $staffNotes,
             'audit_logs' => $auditLogs,
             'messages' => $messages,
             'users' => $users,
@@ -95,6 +101,8 @@ class AdminDashboardService
                 'lowStockCount' => $motorcycles->filter(fn ($motorcycle) => $motorcycle->availableStock() <= 1)->count(),
                 'warehouseTasksCount' => $warehouseTasks->count(),
                 'newWarehouseTasksCount' => $warehouseTasks->where('status', 'new')->count(),
+                'inventoryReceiptsCount' => $inventoryReceipts->count(),
+                'plannedInventoryReceiptsCount' => $inventoryReceipts->where('status', 'planned')->count(),
             ],
         ];
     }

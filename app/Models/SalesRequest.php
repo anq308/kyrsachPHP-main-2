@@ -30,4 +30,9 @@ class SalesRequest extends Model
     {
         return $this->belongsTo(Motorcycle::class);
     }
+
+    public function staffNotes()
+    {
+        return $this->morphMany(StaffNote::class, 'noteable');
+    }
 }

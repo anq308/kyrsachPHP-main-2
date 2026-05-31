@@ -140,6 +140,32 @@ export interface StockMovement {
   created_at: string;
 }
 
+export interface InventoryReceipt {
+  id: number;
+  motorcycle_id: number;
+  user_id: number | null;
+  supplier_name: string;
+  quantity: number;
+  unit_cost: number;
+  status: 'planned' | 'received' | 'cancelled';
+  expected_at: string | null;
+  received_at: string | null;
+  comment: string | null;
+  motorcycle?: Motorcycle | null;
+  user?: User | null;
+  created_at: string;
+}
+
+export interface StaffNote {
+  id: number;
+  user_id: number | null;
+  noteable_type: string;
+  noteable_id: number;
+  body: string;
+  user?: User | null;
+  created_at: string;
+}
+
 export interface WarehouseTask {
   id: number;
   order_id: number;

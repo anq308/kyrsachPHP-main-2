@@ -34,4 +34,9 @@ class ServiceRequest extends Model
     {
         return $this->belongsTo(ServiceSlot::class);
     }
+
+    public function staffNotes()
+    {
+        return $this->morphMany(StaffNote::class, 'noteable');
+    }
 }

@@ -37,4 +37,9 @@ class WarehouseTask extends Model
     {
         return $this->belongsTo(User::class, 'assigned_user_id');
     }
+
+    public function staffNotes()
+    {
+        return $this->morphMany(StaffNote::class, 'noteable');
+    }
 }

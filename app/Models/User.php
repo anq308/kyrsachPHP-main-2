@@ -149,6 +149,16 @@ class User extends Authenticatable
         return $this->hasMany(AuditLog::class);
     }
 
+    public function inventoryReceipts()
+    {
+        return $this->hasMany(InventoryReceipt::class);
+    }
+
+    public function staffNotes()
+    {
+        return $this->hasMany(StaffNote::class);
+    }
+
     public function hasFavorite($motorcycleId): bool
     {
         return $this->favorites()->where('motorcycle_id', $motorcycleId)->exists();

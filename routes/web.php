@@ -51,6 +51,11 @@ Route::prefix('api')->group(function () {
         Route::get('/orders', [SpaApiController::class, 'adminOrdersIndex']);
         Route::get('/payments', [SpaApiController::class, 'adminPaymentsIndex']);
         Route::get('/stock-movements', [SpaApiController::class, 'adminStockMovementsIndex']);
+        Route::get('/inventory-receipts', [SpaApiController::class, 'adminInventoryReceiptsIndex']);
+        Route::post('/inventory-receipts', [SpaApiController::class, 'adminStoreInventoryReceipt']);
+        Route::patch('/inventory-receipts/{id}/status', [SpaApiController::class, 'adminUpdateInventoryReceiptStatus']);
+        Route::get('/staff-notes', [SpaApiController::class, 'adminStaffNotesIndex']);
+        Route::post('/staff-notes', [SpaApiController::class, 'adminStoreStaffNote']);
         Route::patch('/warehouse-tasks/{id}/status', [SpaApiController::class, 'adminUpdateWarehouseTaskStatus']);
         Route::post('/service-slots', [SpaApiController::class, 'adminStoreServiceSlot']);
         Route::patch('/service-slots/{id}', [SpaApiController::class, 'adminUpdateServiceSlot']);

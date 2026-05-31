@@ -63,4 +63,14 @@ class Motorcycle extends Model
     {
         return $this->hasMany(Reservation::class);
     }
+
+    public function inventoryReceipts()
+    {
+        return $this->hasMany(InventoryReceipt::class);
+    }
+
+    public function staffNotes()
+    {
+        return $this->morphMany(StaffNote::class, 'noteable');
+    }
 }

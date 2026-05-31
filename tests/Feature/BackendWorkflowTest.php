@@ -537,6 +537,84 @@ class BackendWorkflowTest extends TestCase
             ->assertJsonValidationErrors('reserved_quantity');
     }
 
+    public function test_warehouse_manager_can_create_inventory_receipt_and_apply_stock(): void
+    {
+        $warehouseManager = User::factory()->create(['role' => User::ROLE_WAREHOUSE_MANAGER]);
+        $motorcycle = Motorcycle::factory()->create([
+            'is_available' => false,
+            'stock_quantity' => 0,
+            'reserved_quantity' => 0,
+        ]);
+
+        $this->actingAs($warehouseManager)
+            ->postJson('/api/admin/inventory-receipts', [
+                'motorcycle_id' => $motorcycle->id,
+                'supplier_name' => 'AVANTIS Factory',
+                'quantity' => 3,
+                'unit_cost' => 120000,
+                'status' => 'received',
+                'expected_at' => now()->toDateString(),
+                'comment' => 'Поставка по накладной 42.',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('inventory_receipt.status', 'received');
+
+        $this->assertSame(3, $motorcycle->fresh()->stock_quantity);
+        $this->assertTrue($motorcycle->fresh()->is_available);
+        $this->assertDatabaseHas('inventory_receipts', [
+            'motorcycle_id' => $motorcycle->id,
+            'supplier_name' => 'AVANTIS Factory',
+            'quantity' => 3,
+            'status' => 'received',
+        ]);
+        $this->assertDatabaseHas('stock_movements', [
+            'motorcycle_id' => $motorcycle->id,
+            'user_id' => $warehouseManager->id,
+            'type' => 'receipt',
+            'quantity' => 3,
+            'stock_before' => 0,
+            'stock_after' => 3,
+        ]);
+    }
+
+    public function test_staff_can_add_internal_note_for_their_work_area(): void
+    {
+        $salesManager = User::factory()->create(['role' => User::ROLE_SALES_MANAGER]);
+        $warehouseManager = User::factory()->create(['role' => User::ROLE_WAREHOUSE_MANAGER]);
+        $order = Order::create([
+            'name' => 'Клиент заметки',
+            'phone' => '+79990000501',
+            'total' => 190000,
+            'status' => 'new',
+            'payment_method' => 'cash_pickup',
+            'payment_status' => 'pending',
+            'pickup_point_id' => $this->pickupPoint()->id,
+        ]);
+
+        $this->actingAs($salesManager)
+            ->postJson('/api/admin/staff-notes', [
+                'entity_type' => 'order',
+                'entity_id' => $order->id,
+                'body' => 'Клиент просит звонить после 18:00.',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('staff_note.body', 'Клиент просит звонить после 18:00.');
+
+        $this->assertDatabaseHas('staff_notes', [
+            'user_id' => $salesManager->id,
+            'noteable_type' => Order::class,
+            'noteable_id' => $order->id,
+        ]);
+
+        $this->actingAs($warehouseManager)
+            ->postJson('/api/admin/staff-notes', [
+                'entity_type' => 'order',
+                'entity_id' => $order->id,
+                'body' => 'Попытка оставить комментарий не из своего раздела.',
+            ])
+            ->assertForbidden();
+    }
+
     public function test_admin_can_create_service_slot_and_customer_card(): void
     {
         $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);

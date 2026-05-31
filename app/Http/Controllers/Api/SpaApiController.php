@@ -16,6 +16,7 @@ use App\Http\Requests\UpdateServiceRequestStatusRequest;
 use App\Http\Requests\UpdateUserRoleRequest;
 use App\Models\ContactMessage;
 use App\Models\Favorite;
+use App\Models\InventoryReceipt;
 use App\Models\Motorcycle;
 use App\Models\Order;
 use App\Models\Payment;
@@ -23,6 +24,7 @@ use App\Models\PickupPoint;
 use App\Models\SalesRequest;
 use App\Models\ServiceSlot;
 use App\Models\ServiceRequest;
+use App\Models\StaffNote;
 use App\Models\StockMovement;
 use App\Models\User;
 use App\Models\WarehouseTask;
@@ -685,6 +687,135 @@ class SpaApiController extends Controller
         ]);
     }
 
+    public function adminInventoryReceiptsIndex(Request $request): JsonResponse
+    {
+        $this->authorizeWarehouseWork($request);
+
+        $query = InventoryReceipt::with(['motorcycle', 'user'])->latest();
+
+        if ($request->filled('status') && in_array($request->input('status'), InventoryReceipt::STATUSES, true)) {
+            $query->where('status', $request->input('status'));
+        }
+
+        if ($request->filled('motorcycle_id')) {
+            $query->where('motorcycle_id', (int) $request->input('motorcycle_id'));
+        }
+
+        return response()->json([
+            'inventory_receipts' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
+    public function adminStoreInventoryReceipt(Request $request): JsonResponse
+    {
+        $this->authorizeWarehouseWork($request);
+
+        $validated = $this->validateInventoryReceipt($request);
+        $validated['user_id'] = $request->user()?->id;
+        $validated['received_at'] = $validated['status'] === 'received' ? now() : null;
+
+        $receipt = InventoryReceipt::create($validated)->load(['motorcycle', 'user']);
+
+        if ($receipt->status === 'received') {
+            $this->applyInventoryReceipt($receipt, $request->user());
+        }
+
+        $this->auditLogService->record('inventory_receipt_created', $receipt, $request->user(), 'Создано поступление техники на склад.', null, $receipt->fresh(['motorcycle', 'user'])->toArray());
+
+        return response()->json([
+            'message' => $receipt->status === 'received' ? 'Поступление принято, остаток товара увеличен.' : 'Поступление запланировано.',
+            'inventory_receipt' => $receipt->fresh(['motorcycle', 'user']),
+        ], 201);
+    }
+
+    public function adminUpdateInventoryReceiptStatus(Request $request, string $id): JsonResponse
+    {
+        $this->authorizeWarehouseWork($request);
+
+        $validated = $request->validate([
+            'status' => ['required', 'in:'.implode(',', InventoryReceipt::STATUSES)],
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $receipt = InventoryReceipt::with(['motorcycle', 'user'])->findOrFail($id);
+        $before = $receipt->only(['status', 'received_at', 'comment']);
+        $oldStatus = $receipt->status;
+
+        $receipt->forceFill([
+            'status' => $validated['status'],
+            'comment' => $validated['comment'] ?? $receipt->comment,
+            'received_at' => $validated['status'] === 'received' ? ($receipt->received_at ?? now()) : null,
+        ])->save();
+
+        if ($oldStatus !== 'received' && $receipt->status === 'received') {
+            $this->applyInventoryReceipt($receipt, $request->user());
+        }
+
+        $receipt->refresh();
+        $this->auditLogService->record('inventory_receipt_status_updated', $receipt, $request->user(), 'Изменён статус поступления техники.', $before, $receipt->only(['status', 'received_at', 'comment']));
+
+        return response()->json([
+            'message' => $receipt->status === 'received' ? 'Поставка принята на склад.' : 'Статус поставки обновлён.',
+            'inventory_receipt' => $receipt->fresh(['motorcycle', 'user']),
+        ]);
+    }
+
+    public function adminStaffNotesIndex(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'entity_type' => ['nullable', 'string', 'in:'.implode(',', array_keys(StaffNote::ENTITY_TYPES))],
+            'entity_id' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $this->authorizeStaffNoteAccess($request, $validated['entity_type'] ?? null);
+
+        $query = StaffNote::with('user')->latest();
+
+        if (! empty($validated['entity_type'])) {
+            $entityClass = StaffNote::resolveEntityClass($validated['entity_type']);
+
+            if ($entityClass) {
+                $query->where('noteable_type', $entityClass);
+            }
+        }
+
+        if (! empty($validated['entity_id'])) {
+            $query->where('noteable_id', (int) $validated['entity_id']);
+        }
+
+        return response()->json([
+            'staff_notes' => $this->adminListPayload($request, $query),
+        ]);
+    }
+
+    public function adminStoreStaffNote(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'entity_type' => ['required', 'string', 'in:'.implode(',', array_keys(StaffNote::ENTITY_TYPES))],
+            'entity_id' => ['required', 'integer', 'min:1'],
+            'body' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $this->authorizeStaffNoteAccess($request, $validated['entity_type']);
+
+        $entityClass = StaffNote::resolveEntityClass($validated['entity_type']);
+        $entity = $entityClass::findOrFail($validated['entity_id']);
+
+        $note = StaffNote::create([
+            'user_id' => $request->user()?->id,
+            'noteable_type' => $entity::class,
+            'noteable_id' => $entity->id,
+            'body' => $validated['body'],
+        ]);
+
+        $this->auditLogService->record('staff_note_created', $note, $request->user(), 'Добавлен внутренний комментарий сотрудника.', null, $note->toArray());
+
+        return response()->json([
+            'message' => 'Внутренний комментарий сохранён.',
+            'staff_note' => $note->fresh('user'),
+        ], 201);
+    }
+
     public function adminPaymentsIndex(Request $request): JsonResponse
     {
         $this->authorizeSalesWork($request);
@@ -1132,6 +1263,31 @@ class SpaApiController extends Controller
         abort_unless($request->user()?->isAdmin(), 403, 'Эта задача доступна только администратору.');
     }
 
+    private function authorizeStaffNoteAccess(Request $request, ?string $entityType = null): void
+    {
+        $user = $request->user();
+
+        if ($entityType === 'order' || $entityType === 'sales_request' || $entityType === 'customer') {
+            $this->authorizeSalesWork($request);
+
+            return;
+        }
+
+        if ($entityType === 'service_request') {
+            $this->authorizeServiceWork($request);
+
+            return;
+        }
+
+        if ($entityType === 'warehouse_task' || $entityType === 'motorcycle') {
+            $this->authorizeWarehouseWork($request);
+
+            return;
+        }
+
+        abort_unless($user?->canManagePanel(), 403, 'Комментарии доступны только сотрудникам мотосалона.');
+    }
+
     private function createWarehouseTasksForOrder(Order $order, ?User $manager = null): void
     {
         $order->loadMissing('items');
@@ -1157,6 +1313,41 @@ class SpaApiController extends Controller
                 $this->auditLogService->record('warehouse_task_created', $task, $manager, 'Создана задача кладовщику после подтверждения заказа.', null, $task->toArray());
             }
         }
+    }
+
+    private function validateInventoryReceipt(Request $request): array
+    {
+        return $request->validate([
+            'motorcycle_id' => ['required', 'exists:motorcycles,id'],
+            'supplier_name' => ['required', 'string', 'max:255'],
+            'quantity' => ['required', 'integer', 'min:1', 'max:1000'],
+            'unit_cost' => ['nullable', 'integer', 'min:0'],
+            'status' => ['required', 'in:'.implode(',', InventoryReceipt::STATUSES)],
+            'expected_at' => ['nullable', 'date'],
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+    }
+
+    private function applyInventoryReceipt(InventoryReceipt $receipt, ?User $user = null): void
+    {
+        $motorcycle = $receipt->motorcycle()->lockForUpdate()->firstOrFail();
+        $before = $motorcycle->only(['stock_quantity', 'reserved_quantity', 'is_available']);
+
+        $motorcycle->increment('stock_quantity', $receipt->quantity);
+        $motorcycle->refreshAvailability();
+        $motorcycle->refresh();
+
+        StockMovement::create([
+            'motorcycle_id' => $motorcycle->id,
+            'user_id' => $user?->id,
+            'type' => 'receipt',
+            'quantity' => $receipt->quantity,
+            'stock_before' => (int) $before['stock_quantity'],
+            'stock_after' => (int) $motorcycle->stock_quantity,
+            'reserved_before' => (int) $before['reserved_quantity'],
+            'reserved_after' => (int) $motorcycle->reserved_quantity,
+            'reason' => "Поставка от {$receipt->supplier_name} по поступлению #{$receipt->id}",
+        ]);
     }
 
     private function validateServiceSlot(Request $request): array
