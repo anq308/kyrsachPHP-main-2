@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import api from '../api';
+import { assetUrl } from '../assets';
 import type { Motorcycle, NewsItem } from '../types';
 
 const loading = ref(true);
@@ -75,7 +76,7 @@ async function submitLeadForm() {
   <div>
     <div class="relative bg-dark overflow-hidden min-h-[calc(100vh-5rem)] flex items-center py-20 md:py-24">
       <div class="absolute inset-0 z-0">
-        <img :src="'/images/hero_bg.png'" class="w-full h-full object-cover opacity-40 scale-110" alt="Motocross Action" />
+        <img :src="assetUrl('/images/hero_bg.png')" class="w-full h-full object-cover opacity-40 scale-110" alt="Motocross Action" />
         <div class="absolute inset-0 bg-gradient-to-r from-dark via-dark/80 to-transparent" />
         <div class="absolute inset-0 bg-gradient-to-t from-dark via-transparent to-transparent" />
       </div>
@@ -168,7 +169,7 @@ async function submitLeadForm() {
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <RouterLink to="/catalog?type=Enduro" class="lg:col-span-8 relative group cursor-pointer block overflow-hidden rounded-sm border border-white/5 hover:border-primary/50 transition-all duration-500 bg-dark-lighter">
             <div class="aspect-[16/9] lg:aspect-[16/8] relative overflow-hidden">
-              <img :src="'/images/category_enduro.png'" alt="Enduro" class="object-cover w-full h-full transform group-hover:scale-110 transition-transform duration-700 filter group-hover:brightness-110" />
+              <img :src="assetUrl('/images/category_enduro.png')" alt="Enduro" class="object-cover w-full h-full transform group-hover:scale-110 transition-transform duration-700 filter group-hover:brightness-110" />
               <div class="absolute inset-0 bg-gradient-to-t from-dark via-dark/40 to-transparent opacity-90 group-hover:opacity-80 transition-opacity" />
               <div class="absolute top-0 right-0 w-32 h-32 bg-primary/20 blur-3xl rounded-full transform translate-x-1/2 -translate-y-1/2 group-hover:bg-primary/40 transition-colors duration-500" />
               
@@ -194,7 +195,7 @@ async function submitLeadForm() {
 
           <RouterLink to="/catalog?type=ATV" class="lg:col-span-4 relative group cursor-pointer block overflow-hidden rounded-sm border border-white/5 hover:border-primary/50 transition-all duration-500 bg-dark-lighter">
             <div class="aspect-square lg:aspect-auto lg:h-full relative overflow-hidden">
-              <img :src="'/images/category_atv.png'" alt="ATV" class="object-cover w-full h-full transform group-hover:scale-110 transition-transform duration-700 filter group-hover:brightness-110" />
+              <img :src="assetUrl('/images/category_atv.png')" alt="ATV" class="object-cover w-full h-full transform group-hover:scale-110 transition-transform duration-700 filter group-hover:brightness-110" />
               <div class="absolute inset-0 bg-gradient-to-t from-dark via-dark/40 to-transparent opacity-90 group-hover:opacity-80 transition-opacity" />
               
               <div class="absolute top-6 right-6">
@@ -244,7 +245,7 @@ async function submitLeadForm() {
 
               <div class="md:w-5/12 mt-12 md:mt-0 flex justify-center lg:justify-end relative z-10">
                 <div class="relative w-full max-w-md aspect-[4/3]">
-                  <img :src="'/images/category_parts.png'" alt="Parts" class="absolute inset-0 w-full h-full object-contain filter drop-shadow-2xl opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-700 z-10" />
+                  <img :src="assetUrl('/images/category_parts.png')" alt="Parts" class="absolute inset-0 w-full h-full object-contain filter drop-shadow-2xl opacity-80 group-hover:opacity-100 group-hover:scale-110 transition-all duration-700 z-10" />
                   <div class="absolute inset-0 bg-primary/20 blur-[80px] rounded-full scale-75 group-hover:scale-100 transition-transform duration-700" />
                 </div>
               </div>
@@ -302,7 +303,7 @@ async function submitLeadForm() {
         <div class="bg-dark-lighter border border-white/5 rounded-sm overflow-hidden relative shadow-2xl">
           <div class="grid grid-cols-1 lg:grid-cols-2">
             <div class="relative h-96 lg:h-auto min-h-[500px] group">
-              <img :src="'/images/service_tuning.png'" alt="Service & Tuning" class="absolute inset-0 w-full h-full object-cover grayscale opacity-80 group-hover:grayscale-0 transition-all duration-700" />
+              <img :src="assetUrl('/images/service_tuning.png')" alt="Service & Tuning" class="absolute inset-0 w-full h-full object-cover grayscale opacity-80 group-hover:grayscale-0 transition-all duration-700" />
               <div class="absolute inset-0 bg-gradient-to-r from-transparent to-dark-lighter" />
               <div class="absolute inset-0 bg-gradient-to-t from-dark-lighter via-transparent to-transparent" />
 

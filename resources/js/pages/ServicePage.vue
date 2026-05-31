@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router';
 import api from '../api';
 import AlertMessage from '../components/ui/AlertMessage.vue';
 import PageHero from '../components/ui/PageHero.vue';
+import { assetUrl } from '../assets';
 import { sessionState } from '../session';
 import type { ServiceSlot } from '../types';
 
@@ -131,7 +132,7 @@ onMounted(loadServiceSlots);
 <template>
   <div>
     <PageHero
-      background-image="/images/service_tuning.png"
+      :background-image="assetUrl('/images/service_tuning.png')"
       image-alt="Сервис AVANTIS"
       image-class="opacity-45"
       overlay-class="bg-gradient-to-r from-dark via-dark/85 to-dark/20"
