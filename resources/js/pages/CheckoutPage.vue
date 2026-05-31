@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import api from '../api';
 import AlertMessage from '../components/ui/AlertMessage.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
@@ -8,12 +7,11 @@ import PageHero from '../components/ui/PageHero.vue';
 import { loadSession, sessionState } from '../session';
 import type { CartPayload, PickupPoint } from '../types';
 
-const router = useRouter();
-
 const loading = ref(true);
 const submitting = ref(false);
 const errorText = ref('');
 const successText = ref('');
+const completedOrderId = ref<number | null>(null);
 const cart = ref<CartPayload>({ items: [], total: 0, count: 0 });
 const pickupPoints = ref<PickupPoint[]>([]);
 
@@ -68,10 +66,9 @@ async function submitOrder() {
       pickup_point_id: Number(form.pickup_point_id),
     });
     successText.value = data.message ?? 'Заказ оформлен.';
+    completedOrderId.value = data.order_id ?? null;
     await loadSession();
-    setTimeout(async () => {
-      await router.push(sessionState.user ? '/profile' : '/');
-    }, 700);
+    cart.value = { items: [], total: 0, count: 0 };
   } catch (error: any) {
     errorText.value = error?.response?.data?.message ?? 'Не удалось оформить заказ.';
   } finally {
@@ -107,6 +104,39 @@ onMounted(async () => {
         <AlertMessage v-if="successText" tone="success">{{ successText }}</AlertMessage>
 
         <p v-if="loading" class="text-gray-500 py-8">Загрузка...</p>
+
+        <section v-else-if="completedOrderId" class="max-w-4xl mx-auto bg-dark-lighter border border-primary/30 p-8 md:p-10 text-center relative overflow-hidden">
+          <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary via-orange-400 to-transparent" />
+          <p class="text-primary text-xs font-bold uppercase tracking-[0.25em] mb-4">Заказ принят системой</p>
+          <h2 class="text-4xl md:text-6xl font-display font-bold italic text-white uppercase tracking-normal mb-5">
+            Заказ #{{ completedOrderId }} оформлен
+          </h2>
+          <p class="text-gray-400 text-lg leading-relaxed max-w-2xl mx-auto">
+            Менеджер AVANTIS проверит наличие, закрепит бронь и свяжется с вами по указанному телефону. Если вы вошли в аккаунт, статус заказа появится в личном кабинете.
+          </p>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-8 text-left">
+            <div class="bg-dark border border-white/5 p-4">
+              <p class="text-primary font-display font-bold text-2xl mb-2">01</p>
+              <p class="text-white font-bold uppercase">Проверка заказа</p>
+              <p class="text-gray-600 text-sm mt-1">Менеджер уточнит детали и оплату.</p>
+            </div>
+            <div class="bg-dark border border-white/5 p-4">
+              <p class="text-primary font-display font-bold text-2xl mb-2">02</p>
+              <p class="text-white font-bold uppercase">Бронь техники</p>
+              <p class="text-gray-600 text-sm mt-1">Товар закрепляется до выдачи.</p>
+            </div>
+            <div class="bg-dark border border-white/5 p-4">
+              <p class="text-primary font-display font-bold text-2xl mb-2">03</p>
+              <p class="text-white font-bold uppercase">Выдача</p>
+              <p class="text-gray-600 text-sm mt-1">Вам сообщат дату и пункт получения.</p>
+            </div>
+          </div>
+          <div class="flex flex-col sm:flex-row justify-center gap-4 mt-8">
+            <RouterLink v-if="sessionState.user" to="/profile" class="btn btn-primary"><span>Открыть личный кабинет</span></RouterLink>
+            <RouterLink v-else to="/login" class="btn btn-primary"><span>Войти для отслеживания</span></RouterLink>
+            <RouterLink to="/catalog" class="btn btn-outline"><span>Вернуться в каталог</span></RouterLink>
+          </div>
+        </section>
 
         <EmptyState v-else-if="!cart.items.length" title="Корзина пуста" action-to="/catalog" action-label="Перейти в каталог" />
 
