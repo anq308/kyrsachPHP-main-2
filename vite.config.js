@@ -4,6 +4,7 @@ import laravel from 'laravel-vite-plugin';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+    base: process.env.VITE_BASE_PATH || '/',
     plugins: [
         vue(),
         laravel({

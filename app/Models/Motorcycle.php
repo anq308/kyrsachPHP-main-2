@@ -37,6 +37,19 @@ class Motorcycle extends Model
         'reserved_quantity' => 'integer',
     ];
 
+    public function getImageUrlAttribute(?string $value): ?string
+    {
+        if (! $value || str_starts_with($value, 'http://') || str_starts_with($value, 'https://')) {
+            return $value;
+        }
+
+        if (str_starts_with($value, '/')) {
+            return rtrim(config('app.url'), '/').$value;
+        }
+
+        return $value;
+    }
+
     public function availableStock(): int
     {
         return max(0, (int) $this->stock_quantity - (int) $this->reserved_quantity);

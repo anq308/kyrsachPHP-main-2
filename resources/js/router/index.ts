@@ -17,7 +17,7 @@ import AdminPage from '../pages/AdminPage.vue';
 import NotFoundPage from '../pages/NotFoundPage.vue';
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   scrollBehavior: () => ({ top: 0 }),
   routes: [
     { path: '/', name: 'home', component: HomePage },
